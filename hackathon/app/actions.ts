@@ -1,7 +1,9 @@
 "use server";
 
 import { getPeopleStatus } from "@/lib/research";
-import { contactKey, createOutreachDraft, draftedContactKeys, inboxId, outreachMode } from "@/lib/outreach/agentmail";
+import type { Contact } from "@/lib/research";
+import { contactKey, findOutreachDraft, inboxId, saveOutreachDraft, sendOutreachToInbox } from "@/lib/outreach/agentmail";
+import { getStoredEmails, updateStoredEmail, type StoredEmail } from "@/lib/outreach/emails";
 import { writeOutreachEmail } from "./outreach";
 import { toResearchJob } from "./researchJobs";
 
@@ -39,6 +41,9 @@ export async function getPeopleResearch(jobId: number): Promise<PeopleResearch> 
   const status = await getPeopleStatus(toResearchJob(jobId));
   if (status.state !== "done") return status;
 
+  // Write everyone's email as soon as they're found, so it's ready when the user looks.
+  ensureOutreachEmails(jobId, status.contacts).catch((err) => console.error("[outreach] could not write emails:", err));
+
   return {
     state: "done",
     people: status.contacts.map((c) => ({
@@ -54,10 +59,6 @@ export async function getPeopleResearch(jobId: number): Promise<PeopleResearch> 
 
 export type OutreachState = {
   inbox: string;
-  // Where drafts are addressed: the real contacts, a test address, or nobody.
-  recipients: { live: true } | { live: false; testRecipient?: string };
-  // Profile URLs of people that already have a draft for this job.
-  drafted: string[];
 };
 
 async function doneContacts(jobId: number) {
@@ -66,40 +67,120 @@ async function doneContacts(jobId: number) {
   return status.contacts;
 }
 
-export async function getOutreachState(jobId: number): Promise<OutreachState> {
-  const contacts = await doneContacts(jobId);
-  const keys = await draftedContactKeys(String(jobId));
-  const mode = outreachMode();
+export async function getOutreachState(): Promise<OutreachState> {
+  return { inbox: inboxId() };
+}
+
+export type OutreachEmail = {
+  subject: string;
+  text: string;
+  // Whether it's in the AgentMail inbox, and whether it was edited since.
+  drafted: boolean;
+  changed: boolean;
+  sentAt?: string;
+};
+
+function toOutreachEmail(e: StoredEmail): OutreachEmail {
   return {
-    inbox: inboxId(),
-    recipients: mode,
-    drafted: contacts.filter((c) => keys.has(contactKey(c.profileUrl))).map((c) => c.profileUrl),
+    subject: e.subject,
+    text: e.text,
+    drafted: Boolean(e.draft),
+    changed: Boolean(e.draft) && (e.draft!.subject !== e.subject || e.draft!.text !== e.text),
+    sentAt: e.sentAt,
   };
 }
 
-// Writes an email to one researched contact and saves it as a draft in the
-// AgentMail inbox. Nothing is ever sent from here (see lib/outreach/agentmail.ts).
-export async function draftOutreachEmail(jobId: number, profileUrl: string): Promise<void> {
-  const contact = (await doneContacts(jobId)).find((c) => c.profileUrl === profileUrl);
-  if (!contact) throw new Error("Unknown contact for this job");
+// Writing is an LLM call, so concurrent requests for the same contact share one.
+const writing = new Map<string, Promise<StoredEmail>>();
 
-  const email = await writeOutreachEmail(jobId, contact);
-  await createOutreachDraft({
-    jobId: String(jobId),
-    profileUrl: contact.profileUrl,
-    recipientName: contact.name,
-    recipientEmail: contact.email,
-    ...email,
-  });
+// Picks up a draft already in AgentMail (made before emails were stored here), else writes a new email.
+function ensureOutreachEmail(jobId: number, contact: Contact, stored?: StoredEmail): Promise<StoredEmail> {
+  if (stored) return Promise.resolve(stored);
+  const key = `${jobId}:${contactKey(contact.profileUrl)}`;
+  let pending = writing.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const existing = await findOutreachDraft(String(jobId), contact.profileUrl).catch(() => undefined);
+      const email = existing ?? (await writeOutreachEmail(jobId, contact));
+      return updateStoredEmail(jobId, contact.profileUrl, (current) => current ?? { ...email, draft: existing });
+    })().finally(() => writing.delete(key));
+    writing.set(key, pending);
+  }
+  return pending;
 }
 
-// Drafts emails to several contacts in parallel. Done in one action because the
-// client dispatches server actions one at a time. Returns an error per failed profile URL.
-export async function draftOutreachEmails(jobId: number, profileUrls: string[]): Promise<Record<string, string>> {
-  const results = await Promise.allSettled(profileUrls.map((url) => draftOutreachEmail(jobId, url)));
-  const errors: Record<string, string> = {};
-  results.forEach((r, i) => {
-    if (r.status === "rejected") errors[profileUrls[i]] = r.reason instanceof Error ? r.reason.message : String(r.reason);
+async function ensureOutreachEmails(jobId: number, contacts: Contact[]) {
+  const stored = await getStoredEmails(jobId);
+  return Promise.allSettled(contacts.map((c) => ensureOutreachEmail(jobId, c, stored[contactKey(c.profileUrl)])));
+}
+
+// Every contact's email for this job, keyed by profile URL; writes any that are missing.
+export async function getOutreachEmails(jobId: number): Promise<Record<string, OutreachEmail | { error: string }>> {
+  const contacts = await doneContacts(jobId);
+  const results = await ensureOutreachEmails(jobId, contacts);
+  return Object.fromEntries(
+    contacts.map((c, i) => {
+      const r = results[i];
+      return [
+        c.profileUrl,
+        r.status === "fulfilled"
+          ? toOutreachEmail(r.value)
+          : { error: r.reason instanceof Error ? r.reason.message : String(r.reason) },
+      ];
+    }),
+  );
+}
+
+// Saves edits in our store only; the AgentMail draft changes when the user drafts again.
+export async function saveOutreachEmail(jobId: number, profileUrl: string, subject: string, text: string) {
+  const saved = await updateStoredEmail(jobId, profileUrl, (current) => ({ ...current, subject, text }));
+  return toOutreachEmail(saved);
+}
+
+// Only researched contacts of this job can have outreach emails.
+async function findContact(jobId: number, profileUrl: string) {
+  const contact = (await doneContacts(jobId)).find((c) => c.profileUrl === profileUrl);
+  if (!contact) throw new Error("Unknown contact for this job");
+}
+
+// Puts the email into the AgentMail inbox as a draft, or updates the contact's draft
+// there. Drafts are never sent (see lib/outreach/agentmail.ts).
+export async function draftOutreachEmail(jobId: number, profileUrl: string, subject: string, text: string) {
+  await findContact(jobId, profileUrl);
+  const stored = (await getStoredEmails(jobId))[contactKey(profileUrl)];
+  const draftId = stored?.draft?.id ?? (await findOutreachDraft(String(jobId), profileUrl))?.id;
+  const draft = await saveOutreachDraft(
+    {
+      jobId: String(jobId),
+      profileUrl,
+      subject,
+      text,
+    },
+    draftId,
+  );
+  const saved = await updateStoredEmail(jobId, profileUrl, (current) => ({
+    ...current,
+    subject,
+    text,
+    draft: { id: draft.draft_id, subject, text },
+  }));
+  return toOutreachEmail(saved);
+}
+
+// Sends the email to our own AgentMail inbox, never to the contact.
+export async function sendOutreachEmail(jobId: number, profileUrl: string, subject: string, text: string) {
+  await findContact(jobId, profileUrl);
+  await sendOutreachToInbox({
+    jobId: String(jobId),
+    profileUrl,
+    subject,
+    text,
   });
-  return errors;
+  const saved = await updateStoredEmail(jobId, profileUrl, (current) => ({
+    ...current,
+    subject,
+    text,
+    sentAt: new Date().toISOString(),
+  }));
+  return toOutreachEmail(saved);
 }

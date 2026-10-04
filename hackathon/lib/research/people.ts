@@ -2,7 +2,10 @@ import type { AgentRun, CreateAgentRunParams } from "exa-js";
 import { domainOf } from "./exa";
 import type { Contact, ContactRole, Job, Source } from "./types";
 
-const ROLES: ContactRole[] = ["hiring_manager", "recruiter", "executive", "team_member"];
+// Bump when the prompt or schema changes; runs from older versions are ignored and redone.
+export const PEOPLE_RUN_VERSION = "2";
+
+const ROLES: ContactRole[] =["hiring_manager", "recruiter", "executive", "team_member"];
 
 const contactsSchema = {
   type: "object",
@@ -26,7 +29,7 @@ const contactsSchema = {
             description: "A specific detail (project, post, talk, background) to mention in a personal outreach message",
           },
         },
-        required: ["name", "title", "role", "profile_url", "priority", "reason"],
+        required: ["name", "title", "role", "profile_url", "email", "priority", "reason"],
       },
     },
   },
@@ -35,7 +38,7 @@ const contactsSchema = {
 
 const systemPrompt = `You help a job candidate decide who to reach out to about one specific job.
 Only include people who currently work at the hiring company; verify this from their profile or the company site and leave out anyone you cannot verify. Never guess a name or profile URL.
-Include a work email and profile photo URL when you can find them; leave them empty rather than constructing an email from a naming pattern.
+Every contact needs a work email you actually found published (company site, profile, talk, paper, repo). Only include people whose email you found; never construct one from a naming pattern, and leave a person out rather than guess. Include a profile photo URL when you can find one.
 Roles: hiring_manager = likely manager or team lead for this role; recruiter = recruiting, talent or people team; executive = founders and C-level/VP; team_member = people in the same or an adjacent role.
 Order contacts by priority. The likely hiring manager ranks highest, then the recruiter for that area. At companies under ~200 people, founders and CTOs are often directly involved in hiring and should rank high.`;
 
@@ -47,7 +50,7 @@ type AgentContact = {
   priority: number;
   reason: string;
   hook?: string;
-  email?: string;
+  email: string;
   photo_url?: string;
 };
 
@@ -80,8 +83,12 @@ export function peopleRunParams(job: Job): CreateAgentRunParams {
     outputSchema: contactsSchema,
     effort: "auto",
     budget: { maxCostDollars: Number(process.env.EXA_AGENT_MAX_COST ?? 2) },
-    metadata: { jobId: job.id },
+    metadata: { jobId: job.id, version: PEOPLE_RUN_VERSION },
   };
+}
+
+export function isCurrentRun(run: AgentRun) {
+  return (run.request?.metadata as { version?: unknown } | undefined)?.version === PEOPLE_RUN_VERSION;
 }
 
 // Job id a run was created for, read back from its stored request.
@@ -108,18 +115,22 @@ export async function contactsFromRun(run: AgentRun): Promise<{ contacts: Contac
     sources.set(i, list);
   }
 
-  const raw = (run.output?.structured as { contacts?: AgentContact[] } | undefined)?.contacts ?? [];
-  const photos = await Promise.all(raw.map((c) => workingImage(c.photo_url)));
+  // Only people we can actually email are useful for outreach; drop the rest.
+  // Keep each contact's original index, since grounding citations are keyed by it.
+  const raw = ((run.output?.structured as { contacts?: AgentContact[] } | undefined)?.contacts ?? [])
+    .map((c, i) => ({ c, i }))
+    .filter(({ c }) => c.email?.trim());
+  const photos = await Promise.all(raw.map(({ c }) => workingImage(c.photo_url)));
 
   const contacts = raw
     .map(
-      (c, i): Contact => ({
+      ({ c, i }, n): Contact => ({
         name: c.name,
         title: c.title,
         role: ROLES.includes(c.role) ? c.role : "team_member",
         profileUrl: c.profile_url,
-        email: c.email || undefined,
-        photoUrl: photos[i],
+        email: c.email!.trim(),
+        photoUrl: photos[n],
         priority: Math.max(1, Math.min(100, Math.round(c.priority))),
         reason: c.reason,
         hooks: c.hook,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { PDFViewer, pdf } from "@react-pdf/renderer";
+import { usePDF } from "@react-pdf/renderer";
 import { getDocumentProxy } from "unpdf";
 import Resume from "./Resume";
 import { buildResumeData, useResumeStore } from "./resume-store";
@@ -9,21 +9,28 @@ import { buildResumeData, useResumeStore } from "./resume-store";
 export default function ResumePreview() {
   const experiences = useResumeStore((s) => s.experiences);
   const resume = useMemo(() => buildResumeData(experiences), [experiences]);
+
+  const [instance, update] = usePDF({ document: <Resume data={resume} /> });
   const [pages, setPages] = useState<number | null>(null);
 
-  // Render the resume to a blob and read its page count via pdf.js (unpdf).
+  // Re-render the PDF whenever the resume changes.
   useEffect(() => {
+    update(<Resume data={resume} />);
+  }, [resume, update]);
+
+  // Read the page count from the generated blob via pdf.js (unpdf).
+  useEffect(() => {
+    if (!instance.blob) return;
     let cancelled = false;
     (async () => {
-      const blob = await pdf(<Resume data={resume} />).toBlob();
-      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const bytes = new Uint8Array(await instance.blob!.arrayBuffer());
       const doc = await getDocumentProxy(bytes);
       if (!cancelled) setPages(doc.numPages);
     })();
     return () => {
       cancelled = true;
     };
-  }, [resume]);
+  }, [instance.blob]);
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -32,13 +39,14 @@ export default function ResumePreview() {
           ? "Measuring…"
           : `${pages} page${pages === 1 ? "" : "s"}`}
       </div>
-      <div className="flex-1">
-        <PDFViewer
-          style={{ width: "100%", height: "100%", border: "none" }}
-          showToolbar={false}
-        >
-          <Resume data={resume} />
-        </PDFViewer>
+      <div className="min-h-0 flex-1">
+        {instance.url && (
+          <iframe
+            title="Resume preview"
+            src={`${instance.url}#toolbar=0&navpanes=0&view=FitH`}
+            className="h-full w-full border-0"
+          />
+        )}
       </div>
     </div>
   );

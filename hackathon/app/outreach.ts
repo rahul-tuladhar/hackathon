@@ -3,8 +3,8 @@ import type { Contact } from "@/lib/research";
 import jobs from "./jobs";
 import { getGatewayClient, GATEWAY_MODEL } from "./gateway";
 
-// Name used to sign outreach emails; drafts keep a placeholder when it's unset.
-const SENDER_NAME = process.env.OUTREACH_SENDER_NAME || "[Your name]";
+// Name used to sign outreach emails.
+const SENDER_NAME = process.env.OUTREACH_SENDER_NAME || "Niklas";
 
 // Writes a short, personal cold email to one contact about one job.
 export async function writeOutreachEmail(jobId: number, contact: Contact): Promise<{ subject: string; text: string }> {

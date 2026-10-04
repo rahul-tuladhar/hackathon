@@ -1,6 +1,6 @@
 import type { AgentRun } from "exa-js";
 import { exa } from "./exa";
-import { contactsFromRun, peopleRunParams, runJobId } from "./people";
+import { contactsFromRun, isCurrentRun, peopleRunParams, runJobId } from "./people";
 import type { Contact, Job } from "./types";
 
 // People research runs on Exa's servers, independent of our server or any user.
@@ -28,7 +28,7 @@ const store = ((globalThis as { __peopleRuns?: Store }).__peopleRuns ??= initial
 const MAX_RUNS_SCANNED = 500;
 
 function usable(run: AgentRun) {
-  return run.status !== "failed" && run.status !== "cancelled";
+  return run.status !== "failed" && run.status !== "cancelled" && isCurrentRun(run);
 }
 
 // Newest usable run per job id, from the runs stored at Exa.

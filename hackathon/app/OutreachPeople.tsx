@@ -3,62 +3,97 @@
 import { useEffect, useState } from "react";
 import {
   draftOutreachEmail,
-  draftOutreachEmails,
+  getOutreachEmails,
   getOutreachState,
+  saveOutreachEmail,
+  sendOutreachEmail,
+  type OutreachEmail,
   type OutreachState,
   type PersonProfile,
 } from "./actions";
 import PersonCard from "./PersonCard";
 
-type DraftStatus = "drafting" | "drafted" | { error: string };
+type Email = OutreachEmail & { busy?: "drafting" | "sending"; error?: string };
+type EmailState = Email | { error: string } | undefined;
 
-// Researched people with buttons to draft an outreach email to each of them
-// in the AgentMail inbox. Drafts are never sent from the app.
+const isEmail = (e: EmailState): e is Email => Boolean(e && "subject" in e);
+
+// Researched people, each with an outreach email written for them. Emails can be
+// edited here, saved as drafts in the AgentMail inbox, or sent to that inbox itself
+// to see how they land. Nothing is ever sent to the contacts from the app.
 export default function OutreachPeople({ jobId, people }: { jobId: number; people: PersonProfile[] }) {
   const [state, setState] = useState<OutreachState | null>(null);
   const [setupError, setSetupError] = useState<string | null>(null);
-  const [status, setStatus] = useState<Record<string, DraftStatus>>({});
+  const [emails, setEmails] = useState<Record<string, EmailState>>({});
 
   useEffect(() => {
     let cancelled = false;
-    getOutreachState(jobId)
-      .then((result) => {
+    getOutreachState()
+      .then((result) => !cancelled && setState(result))
+      .catch((err) => !cancelled && setSetupError(err?.message ?? "AgentMail is not configured"));
+    getOutreachEmails(jobId)
+      .then((result) => !cancelled && setEmails(result))
+      .catch((err) => {
         if (cancelled) return;
-        setState(result);
-        setStatus(Object.fromEntries(result.drafted.map((url) => [url, "drafted" as const])));
-      })
-      .catch((err) => !cancelled && setSetupError(err?.message ?? "Could not load drafts"));
+        const error = err instanceof Error ? err.message : "Could not write emails";
+        setEmails(Object.fromEntries(people.map((p) => [p.profileUrl, { error }])));
+      });
     return () => {
       cancelled = true;
     };
-  }, [jobId]);
+  }, [jobId, people]);
 
-  const draft = async (profileUrl: string) => {
-    setStatus((s) => ({ ...s, [profileUrl]: "drafting" }));
+  const patch = (profileUrl: string, update: Partial<Email>) =>
+    setEmails((all) => {
+      const current = all[profileUrl];
+      return isEmail(current) ? { ...all, [profileUrl]: { ...current, ...update } } : all;
+    });
+
+  const edit = (profileUrl: string, fields: Pick<Email, "subject"> | Pick<Email, "text">) =>
+    setEmails((all) => {
+      const current = all[profileUrl];
+      if (!isEmail(current)) return all;
+      return { ...all, [profileUrl]: { ...current, ...fields, changed: current.drafted, error: undefined } };
+    });
+
+  // Keeps edits across reloads; the mailbox copy only changes when drafting.
+  const save = (profileUrl: string) => {
+    const e = emails[profileUrl];
+    if (!isEmail(e)) return;
+    saveOutreachEmail(jobId, profileUrl, e.subject, e.text).catch((err) =>
+      patch(profileUrl, { error: err instanceof Error ? err.message : "Could not save" }),
+    );
+  };
+
+  const draft = async (url: string) => {
+    const e = emails[url];
+    if (!isEmail(e)) return;
+    patch(url, { busy: "drafting", error: undefined });
     try {
-      await draftOutreachEmail(jobId, profileUrl);
-      setStatus((s) => ({ ...s, [profileUrl]: "drafted" }));
+      const saved = await draftOutreachEmail(jobId, url, e.subject, e.text);
+      // Keep anything typed while the request was out.
+      setEmails((all) => {
+        const current = all[url];
+        if (!isEmail(current)) return all;
+        const edited = current.subject !== e.subject || current.text !== e.text;
+        return { ...all, [url]: { ...current, drafted: saved.drafted, changed: edited, busy: undefined } };
+      });
     } catch (err) {
-      setStatus((s) => ({ ...s, [profileUrl]: { error: err instanceof Error ? err.message : "Failed to draft" } }));
+      patch(url, { busy: undefined, error: err instanceof Error ? err.message : "Could not draft" });
     }
   };
 
-  const draftAll = async (profileUrls: string[]) => {
-    setStatus((s) => ({ ...s, ...Object.fromEntries(profileUrls.map((url) => [url, "drafting" as const])) }));
-    let errors: Record<string, string>;
+  const send = async (url: string) => {
+    const e = emails[url];
+    if (!isEmail(e)) return;
+    patch(url, { busy: "sending", error: undefined });
     try {
-      errors = await draftOutreachEmails(jobId, profileUrls);
+      const saved = await sendOutreachEmail(jobId, url, e.subject, e.text);
+      patch(url, { sentAt: saved.sentAt, busy: undefined });
     } catch (err) {
-      const error = err instanceof Error ? err.message : "Failed to draft";
-      errors = Object.fromEntries(profileUrls.map((url) => [url, error]));
+      patch(url, { busy: undefined, error: err instanceof Error ? err.message : "Could not send" });
     }
-    setStatus((s) => ({
-      ...s,
-      ...Object.fromEntries(profileUrls.map((url) => [url, errors[url] ? { error: errors[url] } : ("drafted" as const)])),
-    }));
   };
-
-  const undrafted = people.filter((p) => status[p.profileUrl] !== "drafted" && status[p.profileUrl] !== "drafting");
 
   return (
     <>
@@ -66,56 +101,75 @@ export default function OutreachPeople({ jobId, people }: { jobId: number; peopl
         <p className="mt-4 text-sm text-amber-600 dark:text-amber-400">{setupError}</p>
       ) : (
         state && (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-zinc-500">
-            <p>
-              Emails are saved as drafts in {state.inbox} and never sent.{" "}
-              {state.recipients.live
-                ? "Drafts are addressed to the real contacts."
-                : state.recipients.testRecipient
-                  ? `Test mode: drafts are addressed to ${state.recipients.testRecipient}.`
-                  : "Test mode: drafts have no recipient."}
-            </p>
-            {undrafted.length > 0 && (
-              <button
-                type="button"
-                onClick={() => draftAll(undrafted.map((p) => p.profileUrl))}
-                className="rounded-lg bg-blue-600 px-3 py-1.5 font-medium text-white hover:bg-blue-700"
-              >
-                Draft all ({undrafted.length})
-              </button>
-            )}
-          </div>
+          <p className="mt-4 text-sm text-zinc-500">
+            Drafts and sent emails go to {state.inbox}, never to the contacts.
+          </p>
         )
       )}
 
       <div className="mt-5 flex flex-col gap-4">
         {people.map((person) => {
-          const s = status[person.profileUrl];
+          const url = person.profileUrl;
+          const e = emails[url];
           return (
-            <PersonCard
-              key={person.profileUrl}
-              person={person}
-              action={
-                state &&
-                (s === "drafted" ? (
-                  <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Draft saved</span>
-                ) : (
-                  <div className="flex flex-col items-end gap-1">
-                    <button
-                      type="button"
-                      disabled={s === "drafting"}
-                      onClick={() => draft(person.profileUrl)}
-                      className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
-                    >
-                      {s === "drafting" ? "Drafting…" : "Draft email"}
-                    </button>
-                    {typeof s === "object" && (
-                      <span className="max-w-48 text-right text-xs text-amber-600 dark:text-amber-400">{s.error}</span>
+            <PersonCard key={url} person={person}>
+              {!e ? (
+                <p className="mt-4 text-sm text-zinc-500">Writing email…</p>
+              ) : !isEmail(e) ? (
+                <p className="mt-4 text-sm text-amber-600 dark:text-amber-400">{e.error}</p>
+              ) : (
+                <div className="mt-4 flex flex-col gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-900">
+                  <input
+                    value={e.subject}
+                    onChange={(ev) => edit(url, { subject: ev.target.value })}
+                    onBlur={() => save(url)}
+                    aria-label={`Subject of the email to ${person.name}`}
+                    className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium outline-none focus:border-blue-500 dark:border-zinc-700 dark:bg-zinc-900"
+                  />
+                  <textarea
+                    value={e.text}
+                    onChange={(ev) => edit(url, { text: ev.target.value })}
+                    onBlur={() => save(url)}
+                    aria-label={`Email to ${person.name}`}
+                    rows={8}
+                    className="resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm leading-6 outline-none focus:border-blue-500 dark:border-zinc-700 dark:bg-zinc-900"
+                  />
+                  <div className="flex flex-wrap items-center justify-end gap-3">
+                    {e.error && <span className="text-xs text-amber-600 dark:text-amber-400">{e.error}</span>}
+                    {e.sentAt && e.busy !== "sending" && (
+                      <span className="text-sm text-zinc-500">
+                        Sent to inbox {new Date(e.sentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    )}
+                    {state && (
+                      <>
+                        {e.drafted && !e.changed && e.busy !== "drafting" ? (
+                          <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">Draft saved</span>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={Boolean(e.busy)}
+                            onClick={() => draft(url)}
+                            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:hover:bg-zinc-900"
+                          >
+                            {e.busy === "drafting" ? "Saving…" : e.drafted ? "Update draft" : "Save as draft"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          disabled={Boolean(e.busy)}
+                          onClick={() => send(url)}
+                          title={`Sends to ${state.inbox}, not to ${person.name}`}
+                          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {e.busy === "sending" ? "Sending…" : "Send"}
+                        </button>
+                      </>
                     )}
                   </div>
-                ))
-              }
-            />
+                </div>
+              )}
+            </PersonCard>
           );
         })}
       </div>
