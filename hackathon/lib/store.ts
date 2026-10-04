@@ -2,7 +2,7 @@
 
 import jobs from "@/app/jobs";
 import { create } from "zustand";
-import { parseBigCV } from "./sample";
+import { inferTags, parseBigCV } from "./sample";
 import type {
   Assessment,
   BigCVBullet,
@@ -88,6 +88,8 @@ type Actions = {
   setRawCV: (text: string) => void;
   parseFromRaw: () => void;
   toggleBullet: (id: string) => void;
+  updateBullet: (id: string, text: string) => void;
+  updateCV: (cv: GeneratedCV) => void;
   addBullet: (text: string) => void;
   removeBullet: (id: string) => void;
   refreshProviders: () => Promise<void>;
@@ -234,6 +236,25 @@ export const useAgentStore = create<State & Actions>((set, get) => {
     toggleBullet: (id) =>
       set((s) => ({
         bullets: s.bullets.map((b) => (b.id === id ? { ...b, selected: !b.selected } : b)),
+      })),
+
+    updateBullet: (id, text) =>
+      set((s) => {
+        const original = s.bullets.find((b) => b.id === id);
+        return {
+          rawCV:
+            original?.source === "parsed" && original.text
+              ? s.rawCV.replace(original.text, text)
+              : s.rawCV,
+          bullets: s.bullets.map((b) =>
+            b.id === id ? { ...b, text, tags: inferTags(text) } : b,
+          ),
+        };
+      }),
+
+    updateCV: (cv) =>
+      set((s) => ({
+        workspaces: s.workspaces.map((w) => (w.id === s.activeId ? { ...w, cv } : w)),
       })),
 
     addBullet: (text) =>

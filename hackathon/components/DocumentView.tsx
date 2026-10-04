@@ -6,7 +6,7 @@ import { CAPABILITY_BY_ID } from "@/lib/capabilities";
 import { activeNodeKey, FLOW_NODES, nodeState } from "@/lib/pipeline";
 import { extractProfile } from "@/lib/resume-profile";
 import { useActiveWorkspace, useAgentStore } from "@/lib/store";
-import type { JevStep } from "@/lib/types";
+import type { GeneratedCV, JevStep } from "@/lib/types";
 import { FlowDiagram } from "./FlowDiagram";
 import { Markdown } from "./Markdown";
 import { move, ReorderContext, useDragReorder, useReorderContext } from "./Reorder";
@@ -79,15 +79,36 @@ function ResumeSection() {
   const setRawCV = useAgentStore((s) => s.setRawCV);
   const parseFromRaw = useAgentStore((s) => s.parseFromRaw);
   const toggleBullet = useAgentStore((s) => s.toggleBullet);
+  const updateBullet = useAgentStore((s) => s.updateBullet);
   const removeBullet = useAgentStore((s) => s.removeBullet);
   const addBullet = useAgentStore((s) => s.addBullet);
   const uploadResume = useAgentStore((s) => s.uploadResume);
   const [draft, setDraft] = useState("");
+  const [editingBulletId, setEditingBulletId] = useState<string | null>(null);
+  const [bulletDraft, setBulletDraft] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const selected = bullets.filter((b) => b.selected).length;
+
+  const startEditingBullet = (id: string, text: string) => {
+    setEditingBulletId(id);
+    setBulletDraft(text);
+  };
+
+  const saveBullet = () => {
+    const text = bulletDraft.trim();
+    if (!editingBulletId || !text) return;
+    updateBullet(editingBulletId, text);
+    setEditingBulletId(null);
+    setBulletDraft("");
+  };
+
+  const cancelBulletEdit = () => {
+    setEditingBulletId(null);
+    setBulletDraft("");
+  };
 
   const handleFile = async (file: File | null | undefined) => {
     if (!file) return;
@@ -181,13 +202,51 @@ function ResumeSection() {
               </svg>
             </button>
             <div className="min-w-0 flex-1">
-              <p
-                className={`text-[12px] leading-snug ${
-                  b.selected ? "text-zinc-800 dark:text-zinc-200" : "text-zinc-500 dark:text-zinc-400"
-                }`}
-              >
-                {b.text}
-              </p>
+              {editingBulletId === b.id ? (
+                <div className="space-y-2">
+                  <textarea
+                    autoFocus
+                    value={bulletDraft}
+                    onChange={(e) => setBulletDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        cancelBulletEdit();
+                      }
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        saveBullet();
+                      }
+                    }}
+                    aria-label={`Edit bullet ${b.id}`}
+                    className="min-h-16 w-full resize-y rounded-lg border border-blue-300 bg-white px-2.5 py-2 text-[12px] leading-snug text-zinc-800 outline-none focus:border-blue-500 dark:border-blue-800 dark:bg-zinc-900 dark:text-zinc-200"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={saveBullet}
+                      disabled={!bulletDraft.trim()}
+                      className="rounded-md bg-blue-600 px-2.5 py-1 text-[11px] font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={cancelBulletEdit}
+                      className="rounded-md px-2 py-1 text-[11px] font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                    >
+                      Cancel
+                    </button>
+                    <span className="text-[10px] text-zinc-400">⌘/Ctrl + Enter to save · Esc to cancel</span>
+                  </div>
+                </div>
+              ) : (
+                <p
+                  className={`text-[12px] leading-snug ${
+                    b.selected ? "text-zinc-800 dark:text-zinc-200" : "text-zinc-500 dark:text-zinc-400"
+                  }`}
+                >
+                  {b.text}
+                </p>
+              )}
               {b.tags.length > 0 && (
                 <div className="mt-1 flex flex-wrap gap-1">
                   {b.tags.map((t) => (
@@ -204,6 +263,18 @@ function ResumeSection() {
             <span className="mt-0.5 shrink-0 font-mono text-[10px] text-zinc-400 dark:text-zinc-600">
               {b.id}
             </span>
+            {editingBulletId !== b.id && (
+              <button
+                onClick={() => startEditingBullet(b.id, b.text)}
+                aria-label={`Edit bullet ${b.id}`}
+                title="Edit bullet"
+                className="mt-0.5 shrink-0 rounded p-0.5 text-zinc-400 opacity-0 transition hover:text-blue-600 group-hover:opacity-100 focus:opacity-100 dark:hover:text-blue-400"
+              >
+                <svg viewBox="0 0 14 14" className="size-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="m8.8 2.3 2.9 2.9M2.5 11.5l2.4-.5 6.7-6.7a1.7 1.7 0 0 0-2.4-2.4l-6.7 6.7-.5 2.9Z" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
             <button
               onClick={() => removeBullet(b.id)}
               aria-label="Remove bullet"
@@ -466,9 +537,14 @@ function PipelineSection() {
 
 function CVSection() {
   const ws = useActiveWorkspace();
+  const updateCV = useAgentStore((s) => s.updateCV);
   const [copied, setCopied] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editingWorkspaceId, setEditingWorkspaceId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<GeneratedCV | null>(null);
+  const isEditingThisCV = editing && Boolean(draft) && editingWorkspaceId === ws.id;
 
   const markdown = useMemo(() => {
     if (!ws.cv) return "";
@@ -514,6 +590,27 @@ function CVSection() {
     }
   }, []);
 
+  const startEditing = () => {
+    if (!ws.cv) return;
+    setDraft(structuredClone(ws.cv));
+    setEditingWorkspaceId(ws.id);
+    setEditing(true);
+  };
+
+  const saveEdits = () => {
+    if (!draft) return;
+    updateCV(draft);
+    setEditing(false);
+    setEditingWorkspaceId(null);
+    setDraft(null);
+  };
+
+  const cancelEdits = () => {
+    setEditing(false);
+    setEditingWorkspaceId(null);
+    setDraft(null);
+  };
+
   useEffect(() => {
     const requestDownload = () => void downloadPdf();
     window.addEventListener("tailor:download-pdf", requestDownload);
@@ -529,7 +626,15 @@ function CVSection() {
         actions={
           <div className="flex items-center gap-2">
             {ws.usedMock && <Badge tone="amber">mock</Badge>}
-            <button onClick={downloadPdf} disabled={!ws.cv || pdfBusy} className={`${btnPrimary} disabled:opacity-40`}>
+            {ws.cv && (isEditingThisCV ? (
+              <>
+                <button onClick={saveEdits} className={btnPrimary}>Save changes</button>
+                <button onClick={cancelEdits} className={btnSecondary}>Cancel</button>
+              </>
+            ) : (
+              <button onClick={startEditing} className={btnSecondary}>Edit CV</button>
+            ))}
+            <button onClick={downloadPdf} disabled={!ws.cv || pdfBusy || isEditingThisCV} className={`${btnPrimary} disabled:opacity-40`}>
               {pdfBusy ? "Building PDF…" : "Download PDF"}
             </button>
             <button
@@ -538,7 +643,7 @@ function CVSection() {
                 setCopied(true);
                 setTimeout(() => setCopied(false), 1200);
               }}
-              disabled={!ws.cv}
+              disabled={!ws.cv || isEditingThisCV}
               className={`${btnSecondary} disabled:opacity-40`}
             >
               {copied ? "Copied" : "Copy"}
@@ -550,11 +655,76 @@ function CVSection() {
         <>
           {pdfError && <p role="alert" className="mb-3 text-xs text-rose-700 dark:text-rose-300">{pdfError}</p>}
           <p className="mb-3 text-[11px] text-zinc-500 dark:text-zinc-400">
-            The PDF keeps claims tied to Rahul’s resume and adds strong original points when fewer than five fit the role.
+            {isEditingThisCV
+              ? "Edit the draft below. Your changes will appear in Copy and the downloaded PDF."
+              : "The PDF keeps claims tied to Rahul’s resume and adds strong original points when fewer than five fit the role."}
           </p>
-          <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
-            <Markdown>{markdown}</Markdown>
-          </div>
+          {isEditingThisCV && draft ? (
+            <div className="space-y-5 rounded-2xl border border-blue-200 bg-white p-6 dark:border-blue-900 dark:bg-zinc-950">
+              <label className="block space-y-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Headline</span>
+                <input
+                  value={draft.headline}
+                  onChange={(e) => setDraft({ ...draft, headline: e.target.value })}
+                  className={`${field} text-lg font-semibold`}
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Summary</span>
+                <textarea
+                  value={draft.summary}
+                  onChange={(e) => setDraft({ ...draft, summary: e.target.value })}
+                  rows={4}
+                  className={`${field} resize-y leading-relaxed`}
+                />
+              </label>
+              <label className="block space-y-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Skills · separate with commas</span>
+                <textarea
+                  value={draft.skills.join(", ")}
+                  onChange={(e) => setDraft({
+                    ...draft,
+                    skills: e.target.value.split(",").map((skill) => skill.trim()).filter(Boolean),
+                  })}
+                  rows={2}
+                  className={`${field} resize-y`}
+                />
+              </label>
+              <div className="space-y-3">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Experience</span>
+                {draft.bullets.map((bullet, index) => (
+                  <label key={bullet.id} className="flex items-start gap-3">
+                    <span className="mt-2 font-mono text-[10px] text-zinc-400">{index + 1}</span>
+                    <textarea
+                      value={bullet.text}
+                      onChange={(e) => setDraft({
+                        ...draft,
+                        bullets: draft.bullets.map((item) =>
+                          item.id === bullet.id ? { ...item, text: e.target.value } : item,
+                        ),
+                      })}
+                      rows={3}
+                      aria-label={`Experience bullet ${index + 1}`}
+                      className={`${field} resize-y leading-relaxed`}
+                    />
+                  </label>
+                ))}
+              </div>
+              <label className="block space-y-1.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Cover note</span>
+                <textarea
+                  value={draft.coverNote}
+                  onChange={(e) => setDraft({ ...draft, coverNote: e.target.value })}
+                  rows={3}
+                  className={`${field} resize-y leading-relaxed`}
+                />
+              </label>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950">
+              <Markdown>{markdown}</Markdown>
+            </div>
+          )}
         </>
       ) : (
         <p className="rounded-2xl border border-dashed border-zinc-300 px-4 py-10 text-center text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
