@@ -1,13 +1,9 @@
-import { keywordsFrom } from "./mock";
-import type { BigCVBullet, GeneratedCV, GeneratedBullet, JobTarget } from "./types";
+import type { BigCVBullet, GeneratedCV, GeneratedBullet } from "./types";
 
-const MIN_EXPERIENCE_BULLETS = 5;
-const MAX_EXPERIENCE_BULLETS = 6;
-
-function score(text: string, keywords: string[]) {
-  const normalized = text.toLowerCase();
-  return keywords.reduce((total, keyword) => total + (normalized.includes(keyword) ? 1 : 0), 0);
-}
+// Approximate the vertical space used by a Times 9 pt bullet on letter paper.
+// The PDF has room for roughly 38 weighted lines after its header and sections.
+const PAGE_BULLET_UNITS = 41;
+const CHARS_PER_LINE = 108;
 
 function isExperienceEvidence(text: string) {
   return !/^(education|languages? and frameworks?|technical skills?|certifications?|certification:)/i.test(
@@ -15,77 +11,72 @@ function isExperienceEvidence(text: string) {
   ) && !/\b(?:M\.S\.|B\.S\.|Bachelor of|Master of|University|College of Computing)\b/i.test(text);
 }
 
+function bulletUnits(text: string) {
+  const lines = Math.max(1, Math.ceil(text.replace(/\s+/g, " ").trim().length / CHARS_PER_LINE));
+  return lines + 0.25;
+}
+
 /**
- * Keep model output tied to resume evidence and fill a short result with the
- * strongest original points. More relevant points rank first, checked points
- * win ties, and unchecked points fill only the remaining space.
+ * Keep generated claims tied to selected source evidence, then add the strongest
+ * remaining selected points until the estimated one-page space is used. There
+ * is deliberately no minimum: sparse source material stays sparse.
  */
 export function completeResumeEvidence(
   cv: GeneratedCV,
   source: BigCVBullet[],
-  job: JobTarget,
+  relevanceById: Record<string, number> = {},
 ): GeneratedCV {
-  const keywords = keywordsFrom(`${job.title} ${job.description}`, 30);
   const ranked = source
-    .filter((bullet) => isExperienceEvidence(bullet.text))
+    .filter((bullet) => bullet.selected && isExperienceEvidence(bullet.text))
     .map((bullet, index) => ({
       bullet,
       index,
-      score: score(`${bullet.text} ${bullet.tags.join(" ")}`, keywords),
-      priority: bullet.selected ? 1 : 0,
+      score: relevanceById[bullet.id] ?? 0.5,
     }))
     .sort(
       (a, b) =>
         b.score - a.score ||
-        b.priority - a.priority ||
         Number(/\d/.test(b.bullet.text)) - Number(/\d/.test(a.bullet.text)) ||
         a.index - b.index,
     );
   const evidenceById = new Map(ranked.map(({ bullet }) => [bullet.id, bullet]));
-  const topScore = Math.max(0, ...ranked.map(({ score: relevance }) => relevance));
-  const minimumScore = topScore > 0 ? Math.max(1, Math.floor(topScore * 0.25)) : 0;
   const seenEvidence = new Set<string>();
+  const completed: GeneratedBullet[] = [];
+  let usedUnits = 0;
 
-  const cleaned = cv.bullets
-    .map((bullet) => {
-      const evidence = bullet.evidenceId ? evidenceById.get(bullet.evidenceId) : undefined;
-      const relevance = score(`${bullet.text} ${bullet.keywords.join(" ")} ${evidence?.text ?? ""}`, keywords);
-      return { bullet, evidence, relevance };
-    })
-    .filter(({ bullet, evidence, relevance }) => {
-      if (!bullet.evidenceId || !evidence || seenEvidence.has(bullet.evidenceId)) return false;
-      seenEvidence.add(bullet.evidenceId);
-      return relevance >= minimumScore;
-    })
-    .slice(0, MAX_EXPERIENCE_BULLETS);
+  const add = (bullet: GeneratedBullet) => {
+    if (usedUnits + bulletUnits(bullet.text) > PAGE_BULLET_UNITS) return false;
+    completed.push(bullet);
+    usedUnits += bulletUnits(bullet.text);
+    if (bullet.evidenceId) seenEvidence.add(bullet.evidenceId);
+    return true;
+  };
 
-  const usedEvidence = new Set(
-    cleaned.map(({ bullet }) => bullet.evidenceId).filter((id): id is string => Boolean(id)),
+  const generatedByEvidenceId = new Map(
+    cv.bullets
+      .filter((bullet) => Boolean(bullet.evidenceId && evidenceById.has(bullet.evidenceId)))
+      .map((bullet) => [bullet.evidenceId!, bullet]),
   );
-  const completed: GeneratedBullet[] = cleaned.map(({ bullet }) => bullet);
 
-  for (const { bullet, score: relevance } of ranked) {
-    if (completed.length >= MIN_EXPERIENCE_BULLETS) break;
-    if (usedEvidence.has(bullet.id)) continue;
-
-    const defaultPoint: GeneratedBullet = {
-      id: `default-${bullet.id}`,
+  for (const { bullet } of ranked) {
+    if (seenEvidence.has(bullet.id)) continue;
+    const rewritten = generatedByEvidenceId.get(bullet.id);
+    const original: GeneratedBullet = rewritten ? {
+      ...rewritten,
+      text: rewritten.text.replace(/\s+/g, " ").trim(),
+    } : {
+      id: `source-${bullet.id}`,
       text: bullet.text,
       evidenceId: bullet.id,
-      rationale: relevance > 0
-        ? "Original resume point added to keep the tailored version complete."
-        : "Strong original resume point added where role-specific evidence was limited.",
-      keywords: keywords.filter((keyword) =>
-        `${bullet.text} ${bullet.tags.join(" ")}`.toLowerCase().includes(keyword),
-      ),
+      rationale: "Selected source experience included to preserve relevant detail.",
+      keywords: [],
     };
-    completed.push(defaultPoint);
-    usedEvidence.add(bullet.id);
+    add(original);
   }
 
   return {
     ...cv,
-    bullets: completed.slice(0, MAX_EXPERIENCE_BULLETS),
-    skills: [...new Set(cv.skills)].slice(0, 12),
+    bullets: completed,
+    skills: [...new Set(cv.skills)].slice(0, 14),
   };
 }

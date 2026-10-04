@@ -169,17 +169,36 @@ Set intent → Run agent → Review**.
 
 ## Environment
 
-See `.env.example`. Everything is optional; the app degrades gracefully.
+Create a workspace-local `hackathon/.env.local` from `.env.local.example` (or
+`.env.example`) and add credentials there. `.env.local` is ignored by Git; share
+the example files and setup steps with other workspaces, never credential
+values. Each Conductor workspace needs its own `.env.local`.
 
-- `EXA_API_KEY` — turns `company_research` into real web research.
-- `OPENCODE_API_KEY` — fallback LLM provider.
-- `JEV_HTTP_URL`, `JEV_PROVIDER`, `OPENROUTER_API_KEY` — route Jev live instead of
-  the offline demo provider.
+- **Resume generation and quality assessment:** configure `NEON_AI_GATEWAY_TOKEN`
+  and `NEON_AI_GATEWAY_BASE_URL` for the preferred hosted LLM, or configure the
+  Vercel, OpenAI-compatible, or OpenCode provider described above. Local LM Studio
+  is optional. `LLM_LOCAL=0` disables local-model discovery. If no hosted provider
+  is configured, generation and assessment use a deterministic fallback.
+- **Company research:** `EXA_API_KEY` enables live Exa search. Without it, the
+  feature can use an LLM-generated knowledge brief when a hosted model is
+  configured. Research is context only and is not resume evidence.
+- **Jev live routing:** `VERCEL_AI_GATEWAY` enables the hosted Vercel-backed Jev
+  decision model. `JEV_HTTP_URL` can point to a running JevRouter service;
+  otherwise JevRouter uses its offline demo CLI/provider. `JEV_PROVIDER` and
+  `OPENROUTER_API_KEY` configure the OpenRouter route when used.
+- **Outreach drafts:** `AGENTMAIL_API_KEY` and `AGENTMAIL_INBOX_ID` enable draft
+  creation in the configured AgentMail inbox. Drafts are not sent by the app.
+  `OUTREACH_LIVE_RECIPIENTS` defaults to `false`; set `OUTREACH_TEST_RECIPIENT`
+  for a test address and `OUTREACH_SENDER_NAME` for the signature.
+
+After editing `.env.local`, restart `npm run dev`. `/api/health` reports which
+LLM provider and model the workspace resolved without exposing credentials.
 
 ## What is real vs. stubbed
 
-- **Real:** JevRouter decision/plan with its full contract; local LLM generation
-  and scoring; Big CV parsing; keyword coverage math; the whole UI.
+- **Real:** JevRouter decision/plan with its full contract; hosted gateway or
+  local LLM generation and scoring; Big CV parsing; keyword coverage math; the
+  whole UI.
 - **Stubbed / pluggable:** `email_send` is modelled as a gated capability but no
   mail is sent; `cover_letter` is produced inside the generation step rather than
   as its own routed capability; Exa research falls back to the model's knowledge

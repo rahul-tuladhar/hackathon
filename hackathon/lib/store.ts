@@ -3,6 +3,7 @@
 import jobs from "@/app/jobs";
 import { create } from "zustand";
 import { inferTags, parseBigCV } from "./sample";
+import { extractProfile } from "./resume-profile";
 import type {
   Assessment,
   BigCVBullet,
@@ -37,6 +38,7 @@ function makeWorkspace(job: JobTarget = BLANK_JOB, intent = ""): Workspace {
     intent,
     verbatimness: 50,
     jev: null,
+    relevanceScores: undefined,
     cv: null,
     assessment: null,
     research: null,
@@ -434,6 +436,23 @@ export const useAgentStore = create<State & Actions>((set, get) => {
           `${jev.rationale}${jev.error ? `\n(CLI error: ${jev.error})` : ""}`,
         );
 
+        currentNode = "jev";
+        appendLog(id, "jev", `Scoring ${selected.length} source bullets with Jev relevance probabilities…`);
+        const scoreRes = await fetch("/api/score-bullets", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ bullets: state.bullets, job: ws.job }),
+        });
+        if (!scoreRes.ok) {
+          const detail = await scoreRes.json().catch(() => null) as { error?: string } | null;
+          throw new Error(detail?.error || `Jev bullet scoring failed: ${scoreRes.status}`);
+        }
+        const scored = (await scoreRes.json()) as { scores: Record<string, number>; provider: string };
+        patch(id, { relevanceScores: scored.scores });
+        for (const bullet of selected) {
+          appendLog(id, "jev", `Jev relevance ${Math.round((scored.scores[bullet.id] ?? 0.5) * 100)}%`, bullet.text);
+        }
+
         let research: string | null = null;
         if (jev.executionPlan.includes("company_research")) {
           currentNode = "research";
@@ -464,11 +483,13 @@ export const useAgentStore = create<State & Actions>((set, get) => {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             bullets: state.bullets,
+            sourceSkills: extractProfile(state.rawCV).skills,
             job: ws.job,
             intent: ws.intent,
             verbatimness: ws.verbatimness,
             plan: jev.executionPlan,
             research,
+            relevanceById: scored.scores,
           }),
         });
         if (!genRes.ok) {

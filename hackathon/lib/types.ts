@@ -171,6 +171,7 @@ export type Workspace = {
    */
   verbatimness: number;
   jev: JevPlan | null;
+  relevanceScores?: Record<string, number>;
   cv: GeneratedCV | null;
   assessment: Assessment | null;
   research: string | null;

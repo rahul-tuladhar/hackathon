@@ -10,21 +10,22 @@ export const dynamic = "force-dynamic";
 
 type GenerateBody = {
   bullets?: BigCVBullet[];
+  sourceSkills?: string[];
   job?: JobTarget;
   intent?: string;
   verbatimness?: number;
   plan?: string[];
   research?: string | null;
+  relevanceById?: Record<string, number>;
 };
 
 function isUsableCV(cv: unknown): cv is GeneratedCV {
   if (!cv || typeof cv !== "object") return false;
-  const c = cv as Partial<GeneratedCV>;
+  const candidate = cv as Partial<GeneratedCV>;
   return (
-    typeof c.headline === "string" &&
-    typeof c.summary === "string" &&
-    Array.isArray(c.bullets) &&
-    c.bullets.length > 0
+    typeof candidate.headline === "string" &&
+    typeof candidate.summary === "string" &&
+    Array.isArray(candidate.bullets)
   );
 }
 
@@ -58,15 +59,24 @@ function toPartialCV(value: unknown): GeneratedCV | null {
   };
 }
 
-function normalize(cv: GeneratedCV, sourceBullets: BigCVBullet[], verbatimness: number): GeneratedCV {
+function normalize(
+  cv: GeneratedCV,
+  sourceBullets: BigCVBullet[],
+  verbatimness: number,
+  sourceSkills: string[],
+): GeneratedCV {
   const sourceById = new Map(sourceBullets.map((bullet) => [bullet.id, bullet.text.trim()]));
+  const evidenceText = [
+    ...sourceBullets.filter((bullet) => bullet.selected).map((bullet) => bullet.text),
+    ...sourceSkills,
+  ].join(" ").toLowerCase();
   const clampedVerbatimness = Math.max(0, Math.min(100, Math.round(verbatimness)));
-  const normalizedBullets = (cv.bullets || []).slice(0, 12).map((b, i) => ({
-    id: b.id || `g${i + 1}`,
-    text: String(b.text || "").trim(),
-    evidenceId: b.evidenceId ?? null,
-    rationale: String(b.rationale || "").trim(),
-    keywords: Array.isArray(b.keywords) ? b.keywords.slice(0, 8) : [],
+  const normalizedBullets = (cv.bullets || []).slice(0, Math.max(12, sourceBullets.length)).map((bullet, index) => ({
+    id: bullet.id || `g${index + 1}`,
+    text: String(bullet.text || "").trim(),
+    evidenceId: bullet.evidenceId ?? null,
+    rationale: String(bullet.rationale || "").trim(),
+    keywords: Array.isArray(bullet.keywords) ? bullet.keywords.slice(0, 8) : [],
   }));
   const eligible = normalizedBullets.filter(
     (bullet) => bullet.evidenceId && sourceById.has(bullet.evidenceId),
@@ -79,22 +89,30 @@ function normalize(cv: GeneratedCV, sourceBullets: BigCVBullet[], verbatimness: 
   return {
     headline: cv.headline || "",
     summary: cv.summary || "",
-    skills: Array.isArray(cv.skills) ? cv.skills.slice(0, 16) : [],
+    skills: Array.isArray(cv.skills)
+      ? cv.skills
+          .filter((skill) => typeof skill === "string" && evidenceText.includes(skill.toLowerCase().trim()))
+          .slice(0, 16)
+      : [],
     bullets: normalizedBullets,
     coverNote: cv.coverNote || "",
   };
 }
 
-function fallbackCV(source: BigCVBullet[], job: JobTarget, intent: string, verbatimness: number) {
-  return normalize(
-    completeResumeEvidence(
-      mockGenerate({ bullets: source, job, intent }),
-      source,
-      job,
-    ),
+function fallbackCV(
+  source: BigCVBullet[],
+  job: JobTarget,
+  intent: string,
+  verbatimness: number,
+  sourceSkills: string[],
+  relevanceById: Record<string, number>,
+) {
+  const completed = completeResumeEvidence(
+    mockGenerate({ bullets: source, job, intent }),
     source,
-    verbatimness,
+    relevanceById,
   );
+  return normalize(completed, source, verbatimness, sourceSkills);
 }
 
 export async function POST(request: Request) {
@@ -106,9 +124,11 @@ export async function POST(request: Request) {
   }
 
   const source = body.bullets || [];
+  const sourceSkills = Array.isArray(body.sourceSkills) ? body.sourceSkills : [];
   const bullets = source.filter((bullet) => bullet.selected);
   const job = body.job || { title: "", company: "", url: "", description: "" };
   const intent = body.intent || "";
+  const relevanceById = body.relevanceById ?? {};
   const verbatimness = Math.max(0, Math.min(100, Math.round(body.verbatimness ?? 0)));
   const encoder = new TextEncoder();
   const streamAbort = new AbortController();
@@ -119,8 +139,6 @@ export async function POST(request: Request) {
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      // Flush the response immediately so the browser enters live-draft mode
-      // before the model starts returning tokens.
       controller.enqueue(encoder.encode(": connected\n\n"));
 
       void (async () => {
@@ -128,6 +146,7 @@ export async function POST(request: Request) {
         let latestDraft = "";
         const prompt = generatePrompt({
           bullets,
+          sourceSkills,
           job,
           intent,
           verbatimness,
@@ -153,7 +172,7 @@ export async function POST(request: Request) {
             const parsed = await parsePartialJson(raw);
             const partial = toPartialCV(parsed.value);
             if (!partial || (!partial.headline && !partial.summary && partial.bullets.length === 0)) continue;
-            const cv = normalize(partial, source, verbatimness);
+            const cv = normalize(partial, source, verbatimness, sourceSkills);
             const serialized = JSON.stringify(cv);
             if (serialized === latestDraft) continue;
             latestDraft = serialized;
@@ -162,20 +181,19 @@ export async function POST(request: Request) {
 
           const parsed = extractJson(raw);
           if (!isUsableCV(parsed)) throw new Error("model returned an unusable CV shape");
-          const cv = normalize(
-            completeResumeEvidence(normalize(parsed, source, verbatimness), source, job),
+          const completed = completeResumeEvidence(
+            normalize(parsed, source, verbatimness, sourceSkills),
             source,
-            verbatimness,
+            relevanceById,
           );
+          const cv = normalize(completed, source, verbatimness, sourceSkills);
           send(controller, "complete", { cv, provider: upstream.provider, model: upstream.model });
         } catch (err) {
           if (signal.aborted) return;
           const warning = err instanceof Error ? err.message : String(err);
           send(controller, "warning", { message: warning });
-          const cv = fallbackCV(source, job, intent, verbatimness);
+          const cv = fallbackCV(source, job, intent, verbatimness, sourceSkills, relevanceById);
 
-          // Keep the offline fallback legible in the same live editor by
-          // sending its finished sections as SSE snapshots.
           const empty: GeneratedCV = { headline: "", summary: "", skills: [], bullets: [], coverNote: "" };
           const drafts: GeneratedCV[] = [
             { ...empty, headline: cv.headline },
@@ -185,7 +203,7 @@ export async function POST(request: Request) {
             cv,
           ];
           for (const draft of drafts) {
-            const normalized = normalize(draft, source, verbatimness);
+            const normalized = normalize(draft, source, verbatimness, sourceSkills);
             const serialized = JSON.stringify(normalized);
             if (serialized === latestDraft) continue;
             latestDraft = serialized;

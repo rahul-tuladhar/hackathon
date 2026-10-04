@@ -831,7 +831,7 @@ function CVSection() {
           {ws.cv && <p className="mb-3 text-[11px] text-zinc-500 dark:text-zinc-400">
             {isEditingThisCV
               ? "Edit the draft below. Your changes will appear in Copy and the downloaded PDF."
-              : "The PDF keeps claims tied to Rahul’s resume and adds strong original points when fewer than five fit the role."}
+              : "The one-page PDF includes the strongest relevant experience that fits, grounded in selected resume evidence. Source wording follows the preservation setting above."}
           </p>}
           {isEditingThisCV && draft ? (
             <div className="space-y-5 rounded-2xl border border-blue-200 bg-white p-6 dark:border-blue-900 dark:bg-zinc-950">

@@ -4,151 +4,128 @@ import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import type { ResumeProfile } from "@/lib/resume-profile";
 import type { GeneratedCV, JobTarget } from "@/lib/types";
 
-const ACCENT = "#2563eb";
-const INK = "#18181b";
-const MUTED = "#52525b";
-const RULE = "#e4e4e7";
+const INK = "#111111";
+const MUTED = "#333333";
 
 const styles = StyleSheet.create({
   page: {
-    paddingTop: 38,
-    paddingBottom: 42,
-    paddingHorizontal: 44,
-    fontFamily: "Helvetica",
+    paddingTop: 35,
+    paddingBottom: 34,
+    paddingHorizontal: 43,
+    fontFamily: "Times-Roman",
     color: INK,
-    fontSize: 9,
-    lineHeight: 1.35,
+    fontSize: 9.2,
+    lineHeight: 1.16,
   },
   name: {
-    fontFamily: "Helvetica-Bold",
-    fontSize: 20,
-    letterSpacing: -0.3,
-    color: INK,
+    fontFamily: "Times-Bold",
+    fontSize: 18,
+    lineHeight: 1.25,
+    textAlign: "center",
   },
   contacts: {
-    marginTop: 6,
+    marginTop: 7,
     fontSize: 8.5,
+    lineHeight: 1.2,
+    textAlign: "center",
     color: MUTED,
-  },
-  rule: {
-    marginTop: 12,
-    marginBottom: 11,
-    borderBottomWidth: 1,
-    borderBottomColor: RULE,
-  },
-  headline: {
-    fontFamily: "Helvetica-Bold",
-    fontSize: 10.5,
-    color: ACCENT,
-    marginBottom: 6,
   },
   summary: {
-    fontSize: 9,
-    color: "#3f3f46",
-    marginBottom: 11,
+    marginTop: 0,
+    marginBottom: 7,
+    fontSize: 9.2,
+    lineHeight: 1.17,
   },
   section: {
-    marginBottom: 10,
+    marginBottom: 7,
   },
   sectionLabel: {
-    fontFamily: "Helvetica-Bold",
-    fontSize: 8,
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    color: MUTED,
-    marginBottom: 6,
+    fontFamily: "Times-Bold",
+    fontSize: 10.6,
+    marginBottom: 2.5,
   },
   skills: {
-    fontSize: 8.8,
-    color: INK,
+    fontSize: 9,
+    lineHeight: 1.16,
   },
-  bulletRow: {
-    flexDirection: "row",
-    marginBottom: 3.5,
-  },
-  bulletDot: {
-    width: 3,
-    height: 3,
-    borderRadius: 1.5,
-    backgroundColor: ACCENT,
-    marginTop: 5.5,
-    marginRight: 7,
-  },
-  bulletText: {
-    flex: 1,
-    fontSize: 8.8,
-    color: "#27272a",
-    lineHeight: 1.3,
+  experience: {
+    marginBottom: 4,
   },
   experienceHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 2,
-    marginBottom: 2,
+    marginBottom: 0.5,
   },
   company: {
-    fontFamily: "Helvetica-Bold",
-    fontSize: 9,
-    color: INK,
+    fontFamily: "Times-Bold",
+    fontSize: 9.4,
+    flexShrink: 1,
+  },
+  location: {
+    fontSize: 9.2,
+    flexShrink: 1,
   },
   dates: {
-    fontSize: 8,
-    color: MUTED,
+    fontSize: 9.2,
   },
   role: {
-    fontSize: 8.2,
-    color: MUTED,
-    marginBottom: 2,
+    fontFamily: "Times-Italic",
+    fontSize: 9,
+    marginBottom: 1,
+  },
+  bulletRow: {
+    flexDirection: "row",
+    marginLeft: 14,
+    marginBottom: 1,
+  },
+  bulletDot: {
+    width: 8,
+    fontSize: 9,
+    marginRight: 1,
+  },
+  bulletText: {
+    flex: 1,
+    fontSize: 9.2,
+    lineHeight: 1.16,
   },
   detail: {
-    fontSize: 8.2,
-    color: "#3f3f46",
-    marginBottom: 2,
-  },
-  tailored: {
-    marginTop: 2,
-    fontSize: 8,
-    color: "#a1a1aa",
-  },
-  footer: {
-    position: "absolute",
-    bottom: 22,
-    left: 44,
-    right: 44,
-    flexDirection: "row",
-    justifyContent: "space-between",
-    fontSize: 7.5,
-    color: "#a1a1aa",
+    fontSize: 9,
+    lineHeight: 1.16,
+    marginBottom: 1,
   },
 });
-
-function shorten(text: string, max: number) {
-  const clean = text.replace(/\s+/g, " ").trim();
-  if (clean.length <= max) return clean;
-  const cutoff = clean.lastIndexOf(" ", max - 1);
-  return `${clean.slice(0, cutoff > max * 0.75 ? cutoff : max).trimEnd()}…`;
-}
 
 function experienceGroups(profile: ResumeProfile, cv: GeneratedCV) {
   const groups = new Map<
     string,
-    { company: string; title: string; dates: string; bullets: string[] }
+    { company: string; location: string; title: string; dates: string; bullets: string[] }
   >();
 
-  for (const bullet of cv.bullets.slice(0, 6)) {
+  for (const bullet of cv.bullets) {
     const source = bullet.evidenceId
       ? profile.experienceByBulletId[bullet.evidenceId]
       : undefined;
     const company = source?.company ?? "Selected experience";
+    const location = source?.location ?? "";
     const title = source?.title ?? "";
     const dates = source?.dates ?? "";
-    const key = `${company}|${title}|${dates}`;
-    const group = groups.get(key) ?? { company, title, dates, bullets: [] };
-    group.bullets.push(shorten(bullet.text, 250));
+    const key = `${company}|${location}|${title}|${dates}`;
+    const group = groups.get(key) ?? { company, location, title, dates, bullets: [] };
+    group.bullets.push(bullet.text.replace(/\s+/g, " ").trim());
     groups.set(key, group);
   }
 
-  return [...groups.values()];
+  const monthIndex: Record<string, number> = {
+    jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+    jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
+  };
+  const startDate = (value: string) => {
+    const match = value.match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(19|20)\d{2}/i);
+    if (!match) return 0;
+    const year = Number(value.slice(match.index! + match[0].length - 4, match.index! + match[0].length));
+    return year * 12 + (monthIndex[match[1].slice(0, 3).toLowerCase()] ?? 0);
+  };
+  return [...groups.values()].sort((a, b) => startDate(b.dates) - startDate(a.dates));
 }
 
 function Section({ label, children }: { label: string; children: React.ReactNode }) {
@@ -169,44 +146,45 @@ export function ResumePdf({
   cv: GeneratedCV;
   job: JobTarget;
 }) {
+  const groups = experienceGroups(profile, cv);
+  const skills = cv.skills.slice(0, 14);
+
   return (
     <Document
-      title={`${profile.name} — Resume`}
+      title={`${profile.name} - Resume`}
       author={profile.name}
       subject={job.title ? `Tailored for ${job.title}` : "Resume"}
       creator="Tailor"
     >
-      <Page size="A4" style={styles.page} wrap={false}>
+      <Page size="LETTER" style={styles.page}>
         <View>
           <Text style={styles.name}>{profile.name}</Text>
           {profile.contacts.length > 0 && (
-            <Text style={styles.contacts}>{profile.contacts.join("   ·   ")}</Text>
+            <Text style={styles.contacts}>{profile.contacts.join(" | ")}</Text>
           )}
         </View>
 
-        <View style={styles.rule} />
-
-        <Text style={styles.headline}>{cv.headline}</Text>
-        <Text style={styles.summary}>{shorten(cv.summary, 380)}</Text>
-
-        {cv.skills.length > 0 && (
-          <Section label="Skills">
-            <Text style={styles.skills}>{cv.skills.slice(0, 12).join("  ·  ")}</Text>
+        {cv.summary && (
+          <Section label="Summary">
+            <Text style={styles.summary}>{cv.summary.replace(/\s+/g, " ").replace(/↔/g, "and").trim()}</Text>
           </Section>
         )}
 
-        {cv.bullets.length > 0 && (
-          <Section label="Experience">
-            {experienceGroups(profile, cv).map((group, index) => (
-              <View key={`${group.company}-${index}`} wrap={false}>
+        {groups.length > 0 && (
+          <Section label="Work Experience">
+            {groups.map((group, index) => (
+              <View key={`${group.company}-${index}`} style={styles.experience} wrap={false}>
                 <View style={styles.experienceHeader}>
-                  <Text style={styles.company}>{group.company}</Text>
-                  {group.dates ? <Text style={styles.dates}>{group.dates}</Text> : null}
+                  <Text style={styles.company}>
+                    {group.company}
+                    {group.location ? <Text style={styles.location}> | {group.location}</Text> : null}
+                  </Text>
+                  {group.dates ? <Text style={styles.dates}> | {group.dates}</Text> : null}
                 </View>
                 {group.title ? <Text style={styles.role}>{group.title}</Text> : null}
                 {group.bullets.map((text, bulletIndex) => (
                   <View style={styles.bulletRow} key={`${index}-${bulletIndex}`}>
-                    <View style={styles.bulletDot} />
+                    <Text style={styles.bulletDot}>•</Text>
                     <Text style={styles.bulletText}>{text}</Text>
                   </View>
                 ))}
@@ -217,22 +195,23 @@ export function ResumePdf({
 
         {profile.education.length > 0 && (
           <Section label="Education">
-            {profile.education.slice(0, 2).map((item, index) => (
-              <Text style={styles.detail} key={index}>{shorten(item, 170)}</Text>
+            {profile.education.slice(0, 3).map((item, index) => (
+              <Text style={styles.detail} key={index}>{item}</Text>
             ))}
           </Section>
         )}
 
-        {profile.certifications.length > 0 && (
-          <Section label="Certification">
-            <Text style={styles.detail}>{profile.certifications.slice(0, 3).join(" · ")}</Text>
+        {skills.length > 0 && (
+          <Section label="Technical Skills">
+            <Text style={styles.skills}>{skills.join(", ")}</Text>
           </Section>
         )}
 
-        <View style={styles.footer} fixed>
-          <Text>{profile.name}</Text>
-          {job.title ? <Text style={styles.tailored}>Tailored for {job.title}{job.company ? ` · ${job.company}` : ""}</Text> : <Text />}
-        </View>
+        {profile.certifications.length > 0 && (
+          <Section label="Certifications">
+            <Text style={styles.detail}>{profile.certifications.slice(0, 3).join("; ")}</Text>
+          </Section>
+        )}
       </Page>
     </Document>
   );
