@@ -169,6 +169,8 @@ export type Workspace = {
   research: string | null;
   status: PipelineStatus;
   activeCapability: string | null;
+  /** The pipeline node that failed, retained so the sidebar can show the failure. */
+  pipelineErrorNode?: string;
   logs: LogEntry[];
   usedMock: boolean;
   error: string | null;

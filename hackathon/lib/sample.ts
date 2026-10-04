@@ -59,11 +59,19 @@ export function parseBigCV(raw: string): BigCVBullet[] {
     .filter(Boolean);
 
   const bullets: BigCVBullet[] = [];
+  let section: "experience" | "summary" | "education" | "skills" | "certifications" = "experience";
   for (const line of lines) {
     const isBullet = /^[-*•●]/.test(line);
     const body = line.replace(/^[-*•●]\s*/, "").trim();
+    if (!isBullet) {
+      if (/^(summary|profile|objective)\s*:?$/i.test(line)) section = "summary";
+      else if (/^(education|academic background)\s*:?$/i.test(line)) section = "education";
+      else if (/^(technical skills|skills|technologies)\s*:?$/i.test(line)) section = "skills";
+      else if (/^(certifications?|licenses)\s*:?$/i.test(line)) section = "certifications";
+      else if (/\s+[—–]\s+/.test(line)) section = "experience";
+    }
     // Skip short headers / non-sentences.
-    if (!isBullet) continue;
+    if (!isBullet || section !== "experience") continue;
     if (body.length < 24) continue;
     bullets.push({
       id: `b${bullets.length + 1}`,

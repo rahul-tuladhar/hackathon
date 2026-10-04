@@ -1,15 +1,15 @@
 "use client";
 
 import { useEffect } from "react";
-import { useAgentStore } from "@/lib/store";
+import { useActiveWorkspace, useAgentStore } from "@/lib/store";
 import { Badge, Dot, type Tone } from "./ui";
 
 export function TopBar() {
   const providers = useAgentStore((s) => s.providers);
   const refreshProviders = useAgentStore((s) => s.refreshProviders);
   const hydrateSample = useAgentStore((s) => s.hydrateSample);
-  const loadResume = useAgentStore((s) => s.loadResume);
   const clearAll = useAgentStore((s) => s.clearAll);
+  const workspace = useActiveWorkspace();
 
   useEffect(() => {
     refreshProviders();
@@ -20,24 +20,17 @@ export function TopBar() {
 
   return (
     <header className="z-20 flex flex-wrap items-center gap-3 border-b border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-black">
-      <div className="flex items-center gap-3">
-        <div className="grid size-9 place-items-center rounded-xl bg-blue-50 text-blue-600 ring-1 ring-inset ring-blue-200 dark:bg-blue-950/50 dark:text-blue-400 dark:ring-blue-900">
-          <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="1.8">
-            <path d="M6 3.5h9l4 4V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" />
-            <path d="M15 3.5V8h4M8.5 13h7M8.5 16.5h5" strokeLinecap="round" />
-          </svg>
-        </div>
+      <div className="min-w-0">
         <div className="leading-tight">
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-              Tailor
+              Tailoring workspace
             </h1>
-            <span className="rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 ring-1 ring-inset ring-zinc-200 dark:bg-zinc-900 dark:text-zinc-400 dark:ring-zinc-800">
-              personal CV agent
-            </span>
           </div>
-          <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-            One document per job. Capabilities routed by JevRouter.
+          <p className="max-w-[22rem] truncate text-[11px] text-zinc-500 dark:text-zinc-400">
+            {workspace?.job.title
+              ? `${workspace.job.title}${workspace.job.company ? ` · ${workspace.job.company}` : ""}`
+              : "Choose a target role to begin"}
           </p>
         </div>
       </div>
@@ -59,18 +52,6 @@ export function TopBar() {
         >
           Sample CV
         </button>
-        <button
-          onClick={loadResume}
-          className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700"
-        >
-          My resume
-        </button>
-        <a
-          href="/jobs"
-          className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
-        >
-          Job board
-        </a>
         <button
           onClick={clearAll}
           className="rounded-lg px-3 py-1.5 text-xs font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"

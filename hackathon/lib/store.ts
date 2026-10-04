@@ -41,6 +41,7 @@ function makeWorkspace(job: JobTarget = BLANK_JOB, intent = ""): Workspace {
     research: null,
     status: "idle",
     activeCapability: null,
+    pipelineErrorNode: undefined,
     logs: [],
     usedMock: false,
     error: null,
@@ -57,6 +58,7 @@ function cleared(ws: Workspace): Workspace {
     research: null,
     status: "idle",
     activeCapability: null,
+    pipelineErrorNode: undefined,
     logs: [],
     usedMock: false,
     error: null,
@@ -349,12 +351,20 @@ export const useAgentStore = create<State & Actions>((set, get) => {
 
       const selected = state.bullets.filter((b) => b.selected);
       if (selected.length === 0) {
-        patch(id, { status: "error", error: "Select at least one Big CV bullet first." });
+        patch(id, {
+          status: "error",
+          error: "Select at least one Big CV bullet first.",
+          pipelineErrorNode: "bullets",
+        });
         appendLog(id, "warn", "No bullets selected; nothing to tailor.");
         return;
       }
       if (!ws.job.description.trim()) {
-        patch(id, { status: "error", error: "Paste a job description first." });
+        patch(id, {
+          status: "error",
+          error: "Paste a job description first.",
+          pipelineErrorNode: "jev",
+        });
         appendLog(id, "warn", "No job description; nothing to target.");
         return;
       }
@@ -442,7 +452,22 @@ export const useAgentStore = create<State & Actions>((set, get) => {
         appendLog(id, "info", `Done. Quality score ${assessData.assessment.overall}/100`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        patch(id, { status: "error", error: message, activeCapability: null });
+        const current = get().workspaces.find((w) => w.id === id);
+        const failedNode = current?.activeCapability === "company_research"
+          ? "research"
+          : current?.activeCapability === "cv_generate"
+            ? "generate"
+            : current?.activeCapability === "cv_assess"
+              ? "assess"
+              : current?.jev
+                ? "generate"
+                : "jev";
+        patch(id, {
+          status: "error",
+          error: message,
+          activeCapability: null,
+          pipelineErrorNode: failedNode,
+        });
         appendLog(id, "error", "Pipeline failed", message);
       }
     },

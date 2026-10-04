@@ -76,6 +76,10 @@ export function nodeState(
 ): NodeState {
   const running = (cap: string) => ws.activeCapability === cap;
 
+  if (ws.status === "error" && ws.pipelineErrorNode === key) {
+    return { status: "error", lines: [ws.error || "This step failed."] };
+  }
+
   switch (key) {
     case "bullets":
       return {
@@ -154,6 +158,7 @@ export function nodeState(
 
 /** The node the pipeline is currently working on, for auto-selection. */
 export function activeNodeKey(ws: Workspace): string {
+  if (ws.status === "error" && ws.pipelineErrorNode) return ws.pipelineErrorNode;
   if (ws.status === "routing") return "jev";
   if (ws.activeCapability === "company_research") return "research";
   if (ws.activeCapability === "cv_generate" || ws.status === "generating") return "generate";

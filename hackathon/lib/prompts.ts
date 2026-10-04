@@ -3,7 +3,7 @@ import type { Assessment, BigCVBullet, GeneratedCV, JobTarget } from "./types";
 
 const CV_SCHEMA = `{
   "headline": "one punchy line positioning the candidate for THIS role",
-  "summary": "3-4 sentence professional summary tailored to the role and intent",
+  "summary": "2 sentence professional summary tailored to the role and intent",
   "skills": ["8-14 concrete skills drawn from the Big CV, ordered by relevance to the job"],
   "bullets": [
     {
@@ -72,6 +72,8 @@ Rules:
 - Keep every number from the source verbatim.
 - Rewrite bullets to mirror the job description's language and priorities.
 - Prefer strong verbs, concrete outcomes, and the STAR pattern compressed to one line.
+- Return up to 6 strongest experience bullets. If fewer than 5 are clearly relevant, use the strongest remaining original resume points to make the one-page resume feel complete; preserve their facts and numbers.
+- Keep the summary to two concise sentences. This CV is exported as a one-page resume; do not add a cover letter to the resume body.
 - Return ONLY a single minified JSON object. No markdown, no commentary, no code fences.
 Schema:
 ${CV_SCHEMA}`,
