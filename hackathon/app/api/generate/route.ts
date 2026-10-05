@@ -179,15 +179,36 @@ export async function POST(request: Request) {
             send(controller, "draft", { cv, provider: upstream.provider, model: upstream.model });
           }
 
-          const parsed = extractJson(raw);
-          if (!isUsableCV(parsed)) throw new Error("model returned an unusable CV shape");
+          let parsed: unknown;
+          let resultProvider = upstream.provider;
+          let resultModel = upstream.model;
+          try {
+            parsed = extractJson(raw);
+          } catch {
+            parsed = null;
+          }
+
+          if (!isUsableCV(parsed)) {
+            const repair = await openChatCompletionStream(
+              `${prompt.system}\nThe previous response did not match the required CV schema. Return one complete JSON object with a non-empty headline, summary, and experience bullet array.`,
+              `${prompt.user}\n\nRepair this invalid response using the supplied evidence only, and return the complete schema as JSON:\n${raw.slice(0, 12000)}`,
+              { maxTokens: 6000, signal },
+            );
+            let repairedRaw = "";
+            for await (const chunk of repair.chunks) repairedRaw += chunk;
+            parsed = extractJson(repairedRaw);
+            resultProvider = repair.provider;
+            resultModel = repair.model;
+          }
+
+          if (!isUsableCV(parsed)) throw new Error("model returned an unusable CV shape after retry");
           const completed = completeResumeEvidence(
             normalize(parsed, source, verbatimness, sourceSkills),
             source,
             relevanceById,
           );
           const cv = normalize(completed, source, verbatimness, sourceSkills);
-          send(controller, "complete", { cv, provider: upstream.provider, model: upstream.model });
+          send(controller, "complete", { cv, provider: resultProvider, model: resultModel });
         } catch (err) {
           if (signal.aborted) return;
           const warning = err instanceof Error ? err.message : String(err);

@@ -54,11 +54,22 @@ export async function POST(request: Request) {
 
   try {
     const { system, user } = assessPrompt({ cv, job });
-    const { data, provider, model } = await jsonComplete<Assessment>(system, user, {
+    let completion = await jsonComplete<Assessment>(system, user, {
       maxTokens: 2600,
     });
-    if (!isUsable(data)) throw new Error("model returned an unusable assessment");
-    return Response.json({ assessment: normalize(data), provider, model });
+    if (!isUsable(completion.data)) {
+      completion = await jsonComplete<Assessment>(
+        `${system}\nThe previous response did not match the required assessment schema. Return an overall number and all six dimension objects.`,
+        `${user}\n\nRepair this invalid assessment and return the full JSON schema only:\n${JSON.stringify(completion.data)}`,
+        { maxTokens: 4000 },
+      );
+    }
+    if (!isUsable(completion.data)) throw new Error("model returned an unusable assessment after retry");
+    return Response.json({
+      assessment: normalize(completion.data),
+      provider: completion.provider,
+      model: completion.model,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return Response.json({

@@ -457,11 +457,29 @@ export async function jsonComplete<T>(
   user: string,
   opts: { maxTokens?: number } = {},
 ): Promise<{ data: T; provider: string; model: string }> {
-  const { text, provider, model } = await chatComplete(system, user, {
-    maxTokens: opts.maxTokens ?? 2600,
+  const maxTokens = opts.maxTokens ?? 2600;
+  const first = await chatComplete(system, user, {
+    maxTokens,
   });
-  const data = extractJson(text) as T;
-  return { data, provider, model };
+
+  try {
+    return {
+      data: extractJson(first.text) as T,
+      provider: first.provider,
+      model: first.model,
+    };
+  } catch {
+    const retry = await chatComplete(
+      `${system}\nThe previous response was not valid JSON. Follow the schema exactly and return one complete JSON object.`,
+      `${user}\n\nReturn valid, complete JSON only. Do not use markdown fences or commentary.`,
+      { maxTokens: Math.max(6000, Math.ceil(maxTokens * 1.5)), temperature: 0 },
+    );
+    return {
+      data: extractJson(retry.text) as T,
+      provider: retry.provider,
+      model: retry.model,
+    };
+  }
 }
 
 export async function llmHealth(): Promise<ProviderStatus["llm"]> {

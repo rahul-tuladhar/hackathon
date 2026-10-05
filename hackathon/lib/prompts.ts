@@ -4,7 +4,7 @@ import type { Assessment, BigCVBullet, GeneratedCV, JobTarget } from "./types";
 const CV_SCHEMA = `{
   "headline": "one punchy line positioning the candidate for THIS role",
   "summary": "2 sentence professional summary tailored to the role and intent",
-  "skills": ["concrete skills drawn from the Big CV, ordered by relevance to the job"],
+  "skills": ["concrete skills explicitly supported by the Big CV, ordered by relevance to the job"],
   "bullets": [
     {
       "id": "short id",
@@ -57,7 +57,7 @@ export function generatePrompt(input: {
         b.score - a.score ||
         Number(/\d/.test(b.b.text)) - Number(/\d/.test(a.b.text)),
     )
-    .slice(0, 18)
+    .slice(0, 20)
     .map((x) => x.b);
 
   const evidence = ranked
@@ -65,7 +65,7 @@ export function generatePrompt(input: {
     .join("\n");
 
   // Keep the job text within a predictable token budget.
-  const description = (input.job.description || "(not given)").slice(0, 2600);
+  const description = (input.job.description || "(not given)").slice(0, 6000);
   const verbatimness = Math.max(0, Math.min(100, Math.round(input.verbatimness ?? 0)));
 
   return {
@@ -77,8 +77,10 @@ Rules:
 - Rewrite bullets to reflect the job description's priorities while preserving the source meaning and scope. Do not claim adjacent tools, responsibilities, scale or outcomes that the source does not state.
 - Prefer strong verbs, concrete outcomes, and the STAR pattern compressed to one line.
 - Obey the requested source-wording preservation level exactly. A verbatim bullet must have the same text as its source Big CV bullet, character-for-character (other than surrounding whitespace).
+- Choose evidence for the role's actual responsibilities, not broad keyword overlap alone. When equally relevant points come from different roles, show that range and avoid repeating the same kind of achievement.
+- Make the two-sentence summary specific to the role and include a concrete, source-supported outcome. Avoid generic filler.
 - Return up to 10 strong, distinct experience bullets that fit the one-page limit. Prioritize relevant evidence; do not add tangential bullets to reach a quota or pad a shorter resume.
-- Keep the summary to two concise sentences. This CV is exported as a one-page resume; do not add a cover letter to the resume body.
+- Use the available one-page space for distinct relevant evidence while keeping bullets concise and scannable. This CV is exported as a one-page resume; do not add a cover letter to the resume body.
 - Return ONLY a single minified JSON object. No markdown, no commentary, no code fences.
 Schema:
 ${CV_SCHEMA}`,
