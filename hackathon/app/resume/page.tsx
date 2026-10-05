@@ -7,7 +7,7 @@ import ExperienceForm from "./ExperienceForm";
 // PDFViewer touches browser-only APIs, so load the preview client-side only.
 const ResumePreview = dynamic(() => import("./ResumePreview"), { ssr: false });
 
-export default function TmpResumePage() {
+export default function ResumePage() {
   return (
     <div className="flex min-h-0 flex-1">
       <Group orientation="horizontal" className="h-full w-full">

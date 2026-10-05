@@ -3,12 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { pdf } from "@react-pdf/renderer";
 import { getDocumentProxy } from "unpdf";
-import Resume from "./tmp/Resume";
+import Resume from "./resume/Resume";
 import {
   buildResumeData,
   useResumeStore,
   type Experience,
-} from "./tmp/resume-store";
+} from "./resume/resume-store";
 
 type Scores = Record<string, number[]>;
 
