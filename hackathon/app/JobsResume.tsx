@@ -1,15 +1,16 @@
 "use client";
 
-import { createElement, useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useMemo, useRef, useState } from "react";
 import { extractProfile } from "@/lib/resume-profile";
 import { useAgentStore } from "@/lib/store";
+import { buildRawResume, useResumeStore } from "./resume/resume-store";
 
 export default function JobsResume({ jobId }: { jobId: number }) {
-  const rawCV = useAgentStore((s) => s.rawCV);
-  const bullets = useAgentStore((s) => s.bullets);
+  const experiences = useResumeStore((s) => s.experiences);
   const workspaces = useAgentStore((s) => s.workspaces);
-  const loadResume = useAgentStore((s) => s.loadResume);
   const openBoardJob = useAgentStore((s) => s.openBoardJob);
+  const rawCV = useMemo(() => buildRawResume(experiences), [experiences]);
+  const hasSourceBullets = experiences.some((experience) => experience.bullets.some((bullet) => bullet.trim()));
   const [pdfBusy, setPdfBusy] = useState(false);
   const generating = useRef(false);
   const workspace = useMemo(
@@ -18,13 +19,11 @@ export default function JobsResume({ jobId }: { jobId: number }) {
   );
   const busy = workspace && ["routing", "generating", "assessing"].includes(workspace.status);
 
-  useEffect(() => {
-    if (!rawCV) loadResume();
-  }, [rawCV, loadResume]);
-
   const generate = () => {
-    if (generating.current || !rawCV || !bullets.length) return;
+    if (generating.current || !hasSourceBullets) return;
     generating.current = true;
+    useAgentStore.getState().setRawCV(rawCV);
+    useAgentStore.getState().parseFromRaw();
     openBoardJob(String(jobId));
     void useAgentStore.getState().runPipeline().finally(() => { generating.current = false; });
   };
@@ -57,13 +56,12 @@ export default function JobsResume({ jobId }: { jobId: number }) {
           <p className="mt-1 text-sm text-zinc-500">Jev ranks each source bullet by relevance. Lower-ranked evidence stays if it fits.</p>
         </div>
         <div className="flex gap-2">
-          <button type="button" onClick={generate} disabled={!rawCV || !bullets.length || Boolean(busy)} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-zinc-900">
+          <button type="button" onClick={generate} disabled={!hasSourceBullets || Boolean(busy)} className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:bg-white dark:text-zinc-900">
             {busy ? "Generating…" : workspace?.cv ? "Regenerate resume" : "Generate resume"}
           </button>
           {workspace?.cv && <button type="button" onClick={download} disabled={pdfBusy} className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium disabled:opacity-50 dark:border-zinc-700">{pdfBusy ? "Building PDF…" : "Download PDF"}</button>}
         </div>
       </div>
-      {!rawCV && <p className="mt-4 text-sm text-zinc-500">Loading your resume…</p>}
       {workspace?.error && <p role="alert" className="mt-4 text-sm text-rose-700">{workspace.error}</p>}
       {workspace?.cv && <div className="mt-5 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-950">
         <h4 className="font-semibold">{workspace.cv.headline}</h4>
