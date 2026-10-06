@@ -1,6 +1,8 @@
 import { jsonComplete } from "@/lib/llm";
 import { mockGenerate } from "@/lib/mock";
 import { generatePrompt } from "@/lib/prompts";
+import { completeResumeEvidence } from "@/lib/resume-selection";
+import type { PersonalMemory } from "@/lib/memory";
 import type { BigCVBullet, GeneratedCV, JobTarget } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -12,6 +14,7 @@ type GenerateBody = {
   intent?: string;
   plan?: string[];
   research?: string | null;
+  memories?: PersonalMemory[];
 };
 
 function isUsableCV(cv: unknown): cv is GeneratedCV {
@@ -49,10 +52,15 @@ export async function POST(request: Request) {
     return Response.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  const bullets = (body.bullets || []).filter((b) => b.selected);
+  const source = body.bullets || [];
+  const bullets = source.filter((b) => b.selected);
   const job = body.job || { title: "", company: "", url: "", description: "" };
   const fallback = () =>
-    mockGenerate({ bullets, job, intent: body.intent || "" });
+    completeResumeEvidence(
+      mockGenerate({ bullets: source, job, intent: body.intent || "" }),
+      source,
+      job,
+    );
 
   try {
     const { system, user } = generatePrompt({
@@ -61,6 +69,7 @@ export async function POST(request: Request) {
       intent: body.intent || "",
       plan: body.plan || ["cv_generate", "cv_assess"],
       research: body.research,
+      memories: Array.isArray(body.memories) ? body.memories.filter((item) => item?.status === "approved") : [],
     });
     const { data, provider, model } = await jsonComplete<GeneratedCV>(
       system,
@@ -68,7 +77,11 @@ export async function POST(request: Request) {
       { maxTokens: 4000 },
     );
     if (!isUsableCV(data)) throw new Error("model returned an unusable CV shape");
-    return Response.json({ cv: normalize(data), provider, model });
+    return Response.json({
+      cv: completeResumeEvidence(normalize(data), source, job),
+      provider,
+      model,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return Response.json({

@@ -71,7 +71,7 @@ export function mockGenerate(input: {
     })
     .sort((a, b) => b.overlap - a.overlap || Number(hasNumber(b.b.text)) - Number(hasNumber(a.b.text)));
 
-  const chosen = scored.slice(0, 9).map(({ b }) => b);
+  const chosen = scored.slice(0, 6).map(({ b }) => b);
 
   const bullets = chosen.map((b, i) => ({
     id: `g${i + 1}`,
@@ -87,16 +87,19 @@ export function mockGenerate(input: {
   const skills = jobKeywords
     .filter((k) => selected.some((b) => `${b.text} ${b.tags.join(" ")}`.toLowerCase().includes(k)))
     .slice(0, 12);
+  const sourceSkills = keywordsFrom(selected.map((b) => b.text).join(" "), 12).map(
+    (skill) => skill.length <= 4 ? skill.toUpperCase() : skill.charAt(0).toUpperCase() + skill.slice(1),
+  );
 
-  const role = input.job.title || "the role";
-  const company = input.job.company || "the team";
+  const role = input.job.title || "this role";
+  const domains = [...new Set(selected.flatMap((bullet) => bullet.tags))].slice(0, 3);
 
   return {
-    headline: `${role} candidate with 9 years shipping money-movement systems at scale`,
-    summary: `Backend engineer focused on payments, reliability and developer platforms. I have moved a ledger to event-driven settlement at 4.2M transactions/day, cut reconciliation from hours to seconds, and led a zero-downtime billing migration. I am applying to ${company} because ${input.intent || "the role maps directly to the systems I have owned"}.`,
-    skills: skills.length ? skills : ["Go", "Postgres", "Kafka", "Kubernetes", "Payments", "Distributed systems", "TypeScript"],
+    headline: `${role} · experience grounded in your resume`,
+    summary: `Engineer with experience across ${skills.slice(0, 5).join(", ") || "software engineering"}${domains.length ? `, with a background in ${domains.join(", ")}` : ""}. The achievements below are selected from the experience in your resume and ordered for this role.`,
+    skills: skills.length ? skills : sourceSkills.length ? sourceSkills : ["Software engineering"],
     bullets,
-    coverNote: `I am excited by ${company}'s work on ledger infrastructure. At Northwind Pay I rebuilt the ledger as an event-driven pipeline settling 4.2M transactions/day and reduced duplicate charges by 97% with exactly-once delivery. I have led migrations with zero customer-visible downtime and owned on-call for money movement. I would bring that reliability and payments depth to your platform team.`,
+    coverNote: "",
   };
 }
 

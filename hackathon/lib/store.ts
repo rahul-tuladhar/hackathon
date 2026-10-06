@@ -3,6 +3,8 @@
 import jobs from "@/app/jobs";
 import { create } from "zustand";
 import { parseBigCV } from "./sample";
+import { useMemoryStore } from "./memory-store";
+import { selectRelevantMemories } from "./memory";
 import type {
   Assessment,
   BigCVBullet,
@@ -81,8 +83,8 @@ type State = {
 
 type Actions = {
   // shared
-  hydrateSample: () => void;
-  loadResume: () => void;
+  hydrateSample: () => Promise<void>;
+  loadResume: () => Promise<void>;
   uploadResume: (file: File) => Promise<void>;
   clearAll: () => void;
   setRawCV: (text: string) => void;
@@ -96,6 +98,8 @@ type Actions = {
   openBoardJob: (boardId: string) => void;
   removeWorkspace: (id: string) => void;
   setActiveId: (id: string) => void;
+  setWorkspaceTabName: (id: string, name: string | null) => void;
+  updateWorkspace: (id: string, patch: { tabName?: string | null; job?: Partial<JobTarget>; intent?: string }) => void;
   setJob: (patch: Partial<JobTarget>) => void;
   setIntent: (intent: string) => void;
   // flow ui
@@ -106,7 +110,7 @@ type Actions = {
   reorderWorkspaces: (from: number, to: number) => void;
   loadPrefs: () => void;
   // pipeline
-  runPipeline: () => Promise<void>;
+  runPipeline: (workspaceId?: string) => Promise<void>;
 };
 
 export const useAgentStore = create<State & Actions>((set, get) => {
@@ -138,33 +142,31 @@ export const useAgentStore = create<State & Actions>((set, get) => {
     selectedNode: null,
     sectionOrder: DEFAULT_SECTION_ORDER,
 
-    hydrateSample: () => {
-      import("./sample").then(({ SAMPLE_BIG_CV, SAMPLE_JOB }) => {
-        const ws = makeWorkspace(
-          SAMPLE_JOB,
-          "Tailor this for the payments platform role and emphasise reliability and scale. Keep it to one page, ATS-friendly.",
-        );
-        set({
-          rawCV: SAMPLE_BIG_CV,
-          bullets: parseBigCV(SAMPLE_BIG_CV),
-          sampleLabel: "Payments sample",
-          workspaces: [ws],
-          activeId: ws.id,
-        });
+    hydrateSample: async () => {
+      const { SAMPLE_BIG_CV, SAMPLE_JOB } = await import("./sample");
+      const ws = makeWorkspace(
+        SAMPLE_JOB,
+        "Tailor this for the payments platform role and emphasise reliability and scale. Keep it to one page, ATS-friendly.",
+      );
+      set({
+        rawCV: SAMPLE_BIG_CV,
+        bullets: parseBigCV(SAMPLE_BIG_CV),
+        sampleLabel: "Payments sample",
+        workspaces: [ws],
+        activeId: ws.id,
       });
     },
 
-    loadResume: () => {
-      import("./rahul-resume").then(({ RAHUL_RESUME, RAHUL_DEFAULT_INTENT }) => {
-        set((s) => ({
-          rawCV: RAHUL_RESUME,
-          bullets: parseBigCV(RAHUL_RESUME),
-          sampleLabel: "Rahul Tuladhar (real resume)",
-          workspaces: s.workspaces.map((w) =>
-            cleared({ ...w, intent: w.intent || RAHUL_DEFAULT_INTENT }),
-          ),
-        }));
-      });
+    loadResume: async () => {
+      const { RAHUL_RESUME, RAHUL_DEFAULT_INTENT } = await import("./rahul-resume");
+      set((s) => ({
+        rawCV: RAHUL_RESUME,
+        bullets: parseBigCV(RAHUL_RESUME),
+        sampleLabel: "Rahul Tuladhar (real resume)",
+        workspaces: s.workspaces.map((w) =>
+          cleared({ ...w, intent: w.intent || RAHUL_DEFAULT_INTENT }),
+        ),
+      }));
     },
 
     uploadResume: async (file: File) => {
@@ -240,7 +242,7 @@ export const useAgentStore = create<State & Actions>((set, get) => {
       set((s) => ({
         bullets: [
           ...s.bullets,
-          { id: `m${s.bullets.length + 1}`, text, tags: [], source: "manual", selected: true },
+          { id: `m-${uid()}`, text, tags: [], source: "manual", selected: true },
         ],
       })),
 
@@ -294,6 +296,23 @@ export const useAgentStore = create<State & Actions>((set, get) => {
 
     setActiveId: (id) => set({ activeId: id, flowOpen: false, selectedNode: null }),
 
+    setWorkspaceTabName: (id, name) =>
+      set((s) => ({
+        workspaces: s.workspaces.map((w) =>
+          w.id === id ? { ...w, tabName: name || undefined } : w,
+        ),
+      })),
+
+    updateWorkspace: (id, change) =>
+      set((s) => ({
+        workspaces: s.workspaces.map((workspace) => workspace.id === id ? {
+          ...workspace,
+          ...(change.tabName !== undefined ? { tabName: change.tabName || undefined } : {}),
+          ...(change.job ? { job: { ...workspace.job, ...change.job } } : {}),
+          ...(change.intent !== undefined ? { intent: change.intent } : {}),
+        } : workspace),
+      })),
+
     setJob: (patchObj) =>
       set((s) => ({
         workspaces: s.workspaces.map((w) =>
@@ -343,9 +362,9 @@ export const useAgentStore = create<State & Actions>((set, get) => {
       }
     },
 
-    runPipeline: async () => {
+    runPipeline: async (workspaceId) => {
       const state = get();
-      const id = state.activeId;
+      const id = workspaceId ?? state.activeId;
       const ws = state.workspaces.find((w) => w.id === id);
       if (!ws) return;
 
@@ -416,6 +435,11 @@ export const useAgentStore = create<State & Actions>((set, get) => {
 
         patch(id, { activeCapability: "cv_generate", status: "generating" });
         appendLog(id, "llm", "Capability cv_generate: tailoring the CV…");
+        const approvedMemories = useMemoryStore.getState().memories.filter((memory) => memory.status === "approved");
+        const relevantMemories = selectRelevantMemories(
+          approvedMemories,
+          `${ws.job.title} ${ws.job.company} ${ws.job.description} ${ws.intent}`,
+        );
         const genRes = await fetch("/api/generate", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -425,6 +449,7 @@ export const useAgentStore = create<State & Actions>((set, get) => {
             intent: ws.intent,
             plan: jev.executionPlan,
             research,
+            memories: relevantMemories,
           }),
         });
         if (!genRes.ok) throw new Error(`Generate failed: ${genRes.status}`);
@@ -434,7 +459,12 @@ export const useAgentStore = create<State & Actions>((set, get) => {
           model: string;
         };
         patch(id, { cv: genData.cv, usedMock: genData.provider === "mock" });
-        appendLog(id, "llm", `Tailored CV generated via ${genData.provider}/${genData.model}`);
+        appendLog(
+          id,
+          "llm",
+          `Tailored CV generated via ${genData.provider}/${genData.model}${relevantMemories.length ? ` · personalized with ${relevantMemories.length} approved memory item(s)` : ""}`,
+          relevantMemories.map((memory) => `${memory.category}: ${memory.content}`).join("\n"),
+        );
 
         patch(id, { activeCapability: "cv_assess", status: "assessing" });
         appendLog(id, "llm", "Capability cv_assess: scoring the CV…");

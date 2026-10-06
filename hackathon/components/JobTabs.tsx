@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import jobs from "@/app/jobs";
 import { useAgentStore } from "@/lib/store";
 import type { PipelineStatus } from "@/lib/types";
@@ -43,8 +43,12 @@ export function JobTabs() {
   const addWorkspace = useAgentStore((s) => s.addWorkspace);
   const openBoardJob = useAgentStore((s) => s.openBoardJob);
   const runPipeline = useAgentStore((s) => s.runPipeline);
+  const setWorkspaceTabName = useAgentStore((s) => s.setWorkspaceTabName);
   const reorderWorkspaces = useAgentStore((s) => s.reorderWorkspaces);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const cancelRenameOnBlur = useRef(false);
 
   const { containerRef, dragIndex, overIndex, onPointerDown } = useDragReorder({
     orientation: "horizontal",
@@ -59,19 +63,20 @@ export function JobTabs() {
     active?.status === "assessing";
 
   return (
-    <div className="flex items-center gap-2 border-b border-zinc-200 bg-white px-3 dark:border-zinc-800 dark:bg-black">
-      <div ref={containerRef} className="flex min-w-0 flex-1 items-end gap-0.5 overflow-x-auto">
+    <div className="flex items-center gap-2 border-b border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-800 dark:bg-black">
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <div ref={containerRef} className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto">
         {workspaces.map((w, i) => {
           const isActive = w.id === activeId;
-          const label = w.job.title || "Untitled job";
+          const label = w.tabName || w.job.title || "Untitled job";
           const isDropTarget = overIndex === i && dragIndex !== i;
           return (
             <div
               key={w.id}
-              className={`group relative flex shrink-0 items-center gap-1.5 rounded-t-lg border-b-2 px-2.5 py-2.5 transition ${
+              className={`group relative flex h-8 shrink-0 items-center gap-1 rounded-full border px-1.5 transition-colors ${
                 isActive
-                  ? "border-blue-600 bg-blue-50 dark:bg-blue-950/40"
-                  : "border-transparent hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                  ? "border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/50"
+                  : "border-transparent bg-zinc-50 hover:border-zinc-200 hover:bg-zinc-100 dark:bg-zinc-900/60 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
               } ${dragIndex === i ? "opacity-40" : ""} ${
                 isDropTarget ? "ring-2 ring-blue-400/70 ring-inset" : ""
               }`}
@@ -80,34 +85,75 @@ export function JobTabs() {
                 onPointerDown={onPointerDown(i)}
                 aria-label="Drag to reorder tab"
                 title="Drag to reorder"
-                className="shrink-0 cursor-grab touch-none rounded p-0.5 text-zinc-300 transition hover:bg-zinc-100 hover:text-zinc-500 active:cursor-grabbing dark:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-400"
+                className="shrink-0 cursor-grab touch-none rounded-full p-0.5 text-zinc-400 transition hover:bg-white hover:text-zinc-600 active:cursor-grabbing dark:text-zinc-500 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
               >
                 <Grip />
               </button>
-              <button
-                onClick={() => setActiveId(w.id)}
-                className="flex max-w-[15rem] items-center gap-2 text-left"
-              >
-                <span className={`size-1.5 shrink-0 rounded-full ${STATUS_DOT[w.status]}`} />
-                <span className="min-w-0">
-                  <span
-                    className={`block truncate text-[12px] font-medium ${
-                      isActive ? "text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"
-                    }`}
-                  >
+              {editingId === w.id ? (
+                <input
+                  autoFocus
+                  value={nameDraft}
+                  onChange={(event) => setNameDraft(event.target.value)}
+                  onFocus={(event) => event.currentTarget.select()}
+                  onBlur={() => {
+                    if (cancelRenameOnBlur.current) {
+                      cancelRenameOnBlur.current = false;
+                      setEditingId(null);
+                      return;
+                    }
+                    setWorkspaceTabName(w.id, nameDraft.trim() || null);
+                    setEditingId(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur();
+                    if (event.key === "Escape") {
+                      cancelRenameOnBlur.current = true;
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  aria-label="Rename job tab"
+                  className="w-36 rounded-full border border-blue-300 bg-white px-2 py-1 text-[11px] font-medium text-zinc-900 outline-none ring-2 ring-blue-100 dark:border-blue-800 dark:bg-zinc-950 dark:text-zinc-100 dark:ring-blue-950"
+                />
+              ) : (
+                <button
+                  onClick={() => setActiveId(w.id)}
+                  onDoubleClick={() => {
+                    setActiveId(w.id);
+                    setNameDraft(label);
+                    setEditingId(w.id);
+                  }}
+                  title={`${w.job.title || "Untitled job"}${w.job.company ? ` · ${w.job.company}` : ""} (double-click to rename)`}
+                  className="flex max-w-56 items-center gap-1.5 text-left"
+                >
+                  <span className={`size-1.5 shrink-0 rounded-full ${STATUS_DOT[w.status]}`} />
+                  <span className={`max-w-48 truncate text-[11px] font-medium ${isActive ? "text-zinc-900 dark:text-zinc-100" : "text-zinc-600 dark:text-zinc-400"}`}>
                     {label}
                   </span>
-                  <span className="block truncate text-[10px] text-zinc-500 dark:text-zinc-500">
-                    {w.job.company || (w.job.sourceId ? "" : "no company")}
-                    {w.job.baseRange ? ` · ${formatComp(w.job.baseRange)}` : ""}
-                  </span>
-                </span>
-              </button>
+                </button>
+              )}
+              {editingId !== w.id && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveId(w.id);
+                    setNameDraft(label);
+                    setEditingId(w.id);
+                  }}
+                  aria-label={`Rename ${label}`}
+                  title="Rename tab"
+                  className="shrink-0 rounded-full p-1 text-zinc-400 opacity-100 transition hover:bg-white hover:text-zinc-700 md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                >
+                  <svg viewBox="0 0 16 16" className="size-3" fill="none" stroke="currentColor" strokeWidth="1.4">
+                    <path d="m10.8 2.7 2.5 2.5M3 13l2.7-.6 7.7-7.7a1.8 1.8 0 0 0-2.5-2.5l-7.7 7.7L3 13Z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              )}
               {workspaces.length > 1 && (
                 <button
                   onClick={() => removeWorkspace(w.id)}
-                  aria-label="Close tab"
-                  className="shrink-0 rounded p-0.5 text-zinc-400 opacity-0 transition hover:text-rose-500 group-hover:opacity-100"
+                  aria-label={`Close ${label}`}
+                  title="Close tab"
+                  className="shrink-0 rounded-full p-1 text-zinc-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-500 focus-visible:opacity-100 group-hover:opacity-100 dark:hover:bg-rose-950/50"
                 >
                   <svg viewBox="0 0 14 14" className="size-3" fill="none" stroke="currentColor" strokeWidth="1.6">
                     <path d="M3 3l8 8M11 3l-8 8" strokeLinecap="round" />
@@ -117,11 +163,13 @@ export function JobTabs() {
             </div>
           );
         })}
+        </div>
 
-        <div className="relative shrink-0 pb-1">
+        <div className="relative shrink-0">
           <button
             onClick={() => setMenuOpen((v) => !v)}
-            className="rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
+            aria-expanded={menuOpen}
+            className="rounded-full border border-dashed border-zinc-300 px-2.5 py-1.5 text-[11px] font-medium text-zinc-500 transition hover:border-zinc-400 hover:bg-zinc-50 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:bg-zinc-900 dark:hover:text-zinc-100"
           >
             + Job
           </button>
@@ -165,7 +213,7 @@ export function JobTabs() {
       </div>
 
       <button
-        onClick={runPipeline}
+        onClick={() => void runPipeline()}
         disabled={busy}
         className="mb-1 shrink-0 rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
       >

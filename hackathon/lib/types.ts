@@ -161,6 +161,7 @@ export type ProviderStatus = {
  */
 export type Workspace = {
   id: string;
+  tabName?: string;
   job: JobTarget;
   intent: string;
   jev: JevPlan | null;

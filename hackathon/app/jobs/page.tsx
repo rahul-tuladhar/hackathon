@@ -15,7 +15,7 @@ export default function JobsPage() {
   const selected = selectedId ? jobs[Number(selectedId)] : null;
 
   return (
-    <div className="flex flex-1 bg-zinc-50 font-sans text-zinc-900 dark:bg-black dark:text-zinc-100">
+    <div className="flex h-full min-h-0 min-w-0 flex-1 bg-zinc-50 font-sans text-zinc-900 dark:bg-black dark:text-zinc-100">
       {/* Sidebar */}
       <aside className="w-80 shrink-0 overflow-y-auto border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
         <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">

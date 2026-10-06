@@ -150,6 +150,22 @@ async function withLocalFallback(chain: Resolved[]): Promise<Resolved[]> {
   }
 }
 
+/** Select the same configured OpenAI-compatible provider used by chatComplete. */
+export async function resolveAgentProviders(): Promise<Resolved[]> {
+  const chain = await withLocalFallback(providerChain());
+  const resolvedProviders: Resolved[] = [];
+  for (const candidate of chain) {
+    const resolved = await resolveModel(candidate);
+    if (resolved) resolvedProviders.push(resolved);
+  }
+  if (!resolvedProviders.length) throw new Error("No language model provider is configured or reachable.");
+  return resolvedProviders;
+}
+
+export async function resolveAgentProvider(): Promise<Resolved> {
+  return (await resolveAgentProviders())[0];
+}
+
 type ChatResult = { text: string; provider: string; model: string };
 
 async function callProvider(
@@ -204,7 +220,9 @@ async function callProvider(
     }>;
   };
   const msg = data.choices?.[0]?.message;
-  const text = (msg?.content || "").trim() || (msg?.reasoning_content || "").trim();
+  // Some reasoning-capable OpenAI-compatible providers expose private chain
+  // of thought separately. Never return that as a user-facing completion.
+  const text = (msg?.content || "").trim();
   if (!text) throw new Error(`${p.id} returned an empty completion`);
   return { text, provider: p.id, model: p.model };
 }
