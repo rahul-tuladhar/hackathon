@@ -5,17 +5,22 @@ import { useAgentStore } from "@/lib/store";
 
 /** Seeds the demo with the sample Big CV and restores layout prefs on load. */
 export function Bootstrap() {
-  const rawCV = useAgentStore((s) => s.rawCV);
-  const hydrateSample = useAgentStore((s) => s.hydrateSample);
-  const loadPrefs = useAgentStore((s) => s.loadPrefs);
-
   useEffect(() => {
-    loadPrefs();
-  }, [loadPrefs]);
+    let cancelled = false;
 
-  useEffect(() => {
-    if (!rawCV) hydrateSample();
-  }, [rawCV, hydrateSample]);
+    void (async () => {
+      await useAgentStore.persist.rehydrate();
+      if (cancelled) return;
+
+      const store = useAgentStore.getState();
+      store.loadPrefs();
+      if (!store.rawCV) store.hydrateSample();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   return null;
 }

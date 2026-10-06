@@ -21,7 +21,8 @@ const TECH_HINTS = [
   "sql", "kafka", "kubernetes", "k8s", "terraform", "redis", "grpc", "graphql", "rust",
   "java", "node", "aws", "gcp", "distributed", "idempotency", "webhooks", "ledger",
   "reconciliation", "payments", "fintech", "reliability", "latency", "microservices",
-  "event-driven", "mentoring", "ats",
+  "event-driven", "mentoring", "ats", "ai", "llm", "rag", "next.js", "frontend",
+  "full-stack", "product", "customer", "machine learning", "sdk",
 ];
 
 export function keywordsFrom(text: string, limit = 22): string[] {

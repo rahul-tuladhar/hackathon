@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --background: #fafafa;
@@ -12,11 +13,14 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #000000;
-    --foreground: #f4f4f5;
-  }
+:root.dark {
+  color-scheme: dark;
+  --background: #111110;
+  --foreground: #f4f4f5;
+}
+
+:root:not(.dark) {
+  color-scheme: light;
 }
 
 html,
@@ -34,6 +38,27 @@ body {
   background: rgba(37, 99, 235, 0.2);
 }
 
+@keyframes cv-stream-fade {
+  from {
+    opacity: 0.3;
+    filter: blur(0.35px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+.cv-stream-token {
+  animation: cv-stream-fade 300ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-stream-token {
+    animation: none;
+  }
+}
+
 /* Slim scrollbars that match the shell. */
 * {
   scrollbar-width: thin;
@@ -49,6 +74,15 @@ body {
 }
 *::-webkit-scrollbar-thumb:hover {
   background: rgba(113, 113, 122, 0.55);
+}
+
+/* Opt-out: hide the scrollbar entirely while keeping scroll. Unlayered so it
+   overrides the global scrollbar styling above. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* Document typography for rendered markdown (job board palette). */
@@ -156,42 +190,89 @@ body {
   background: rgb(250 250 250);
 }
 
-@media (prefers-color-scheme: dark) {
-  .md {
-    color: rgb(212 212 216);
-  }
-  .md h1,
-  .md h2,
-  .md h3,
-  .md strong,
-  .md th {
-    color: rgb(244 244 245);
-  }
-  .md h2 {
-    border-bottom-color: rgb(39 39 42);
-  }
-  .md a,
-  .md li::marker {
-    color: rgb(96 165 250);
-  }
-  .md code {
-    background: rgb(39 39 42);
-    color: rgb(212 212 216);
-  }
-  .md pre {
-    background: rgb(9 9 11);
-    border-color: rgb(39 39 42);
-  }
-  .md blockquote {
-    border-left-color: rgb(59 130 246);
-    color: rgb(161 161 170);
-  }
-  .md hr,
-  .md th,
-  .md td {
-    border-color: rgb(39 39 42);
-  }
-  .md th {
-    background: rgb(24 24 27);
-  }
+.dark .md {
+  color: rgb(212 212 216);
+}
+.dark .md h1,
+.dark .md h2,
+.dark .md h3,
+.dark .md strong,
+.dark .md th {
+  color: rgb(244 244 245);
+}
+.dark .md h2 {
+  border-bottom-color: rgb(39 39 42);
+}
+.dark .md a,
+.dark .md li::marker {
+  color: rgb(96 165 250);
+}
+.dark .md code {
+  background: rgb(39 39 42);
+  color: rgb(212 212 216);
+}
+.dark .md pre {
+  background: rgb(9 9 11);
+  border-color: rgb(39 39 42);
+}
+.dark .md blockquote {
+  border-left-color: rgb(59 130 246);
+  color: rgb(161 161 170);
+}
+.dark .md hr,
+.dark .md th,
+.dark .md td {
+  border-color: rgb(39 39 42);
+}
+.dark .md th {
+  background: rgb(24 24 27);
+}
+
+/* Tailwind v4's reset sets buttons to cursor: default; restore the pointer. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+/* Warm settings surfaces shift to the same neutral palette as the app's dark theme. */
+.dark .app-settings-dialog [class*="bg-[#fffefa"] {
+  background-color: #181816;
+}
+.dark .app-settings-dialog [class*="bg-[#f7f6f1"] {
+  background-color: #20201d;
+}
+.dark .app-settings-dialog [class*="bg-[#f3f1e9"],
+.dark .app-settings-dialog [class*="bg-[#faf9f5"] {
+  background-color: #34332e;
+}
+.dark .app-settings-dialog [class*="bg-white"] {
+  background-color: #242422;
+}
+.dark .app-settings-dialog [class*="border-[#"] {
+  border-color: #353530;
+}
+.dark .app-settings-dialog [class*="text-zinc-900"],
+.dark .app-settings-dialog [class*="text-zinc-800"],
+.dark .app-settings-dialog [class*="text-zinc-700"] {
+  color: #f4f4f5;
+}
+.dark .app-settings-dialog [class*="text-zinc-600"] {
+  color: #d4d4d8;
+}
+.dark .app-settings-dialog [class*="text-zinc-500"] {
+  color: #a1a1aa;
+}
+.dark .app-settings-dialog [class*="text-zinc-400"] {
+  color: #85858c;
+}
+.dark .app-settings-dialog [class*="text-amber-700"] {
+  color: #fbbf24;
+}
+.dark .app-settings-dialog [class*="border-amber-500"] {
+  border-color: #a16207;
+}
+.dark .app-settings-dialog input {
+  background-color: #242422;
+  border-color: #494940;
+  color: #f4f4f5;
 }

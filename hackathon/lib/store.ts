@@ -2,7 +2,9 @@
 
 import jobs from "@/app/jobs";
 import { create } from "zustand";
-import { parseBigCV } from "./sample";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { inferTags, parseBigCV } from "./sample";
+import { extractProfile } from "./resume-profile";
 import type {
   Assessment,
   BigCVBullet,
@@ -35,7 +37,9 @@ function makeWorkspace(job: JobTarget = BLANK_JOB, intent = ""): Workspace {
     id: uid(),
     job,
     intent,
+    verbatimness: 50,
     jev: null,
+    relevanceScores: undefined,
     cv: null,
     assessment: null,
     research: null,
@@ -44,6 +48,7 @@ function makeWorkspace(job: JobTarget = BLANK_JOB, intent = ""): Workspace {
     pipelineErrorNode: undefined,
     logs: [],
     usedMock: false,
+    generationProvider: null,
     error: null,
   };
 }
@@ -61,16 +66,21 @@ function cleared(ws: Workspace): Workspace {
     pipelineErrorNode: undefined,
     logs: [],
     usedMock: false,
+    generationProvider: null,
     error: null,
   };
 }
 
 const firstWorkspace = makeWorkspace();
+const IN_PROGRESS_STATUSES = new Set(["routing", "generating", "assessing"]);
 
 type State = {
   rawCV: string;
   bullets: BigCVBullet[];
   sampleLabel: string | null;
+  sourceFilename: string | null;
+  sourceKind: "pdf" | "markdown" | "text" | "docx" | null;
+  sourcePreviewUrl: string | null;
   providers: ProviderStatus | null;
   workspaces: Workspace[];
   activeId: string;
@@ -88,6 +98,9 @@ type Actions = {
   setRawCV: (text: string) => void;
   parseFromRaw: () => void;
   toggleBullet: (id: string) => void;
+  updateBullet: (id: string, text: string) => void;
+  updateCV: (cv: GeneratedCV) => void;
+  updateWorkspaceCV: (workspaceId: string, cv: GeneratedCV) => void;
   addBullet: (text: string) => void;
   removeBullet: (id: string) => void;
   refreshProviders: () => Promise<void>;
@@ -96,8 +109,10 @@ type Actions = {
   openBoardJob: (boardId: string) => void;
   removeWorkspace: (id: string) => void;
   setActiveId: (id: string) => void;
+  setWorkspaceTabName: (id: string, name: string | null) => void;
   setJob: (patch: Partial<JobTarget>) => void;
   setIntent: (intent: string) => void;
+  setVerbatimness: (verbatimness: number) => void;
   // flow ui
   setFlowOpen: (open: boolean) => void;
   selectNode: (key: string | null) => void;
@@ -109,7 +124,12 @@ type Actions = {
   runPipeline: () => Promise<void>;
 };
 
-export const useAgentStore = create<State & Actions>((set, get) => {
+type PersistedState = Pick<
+  State,
+  "rawCV" | "bullets" | "sampleLabel" | "sourceFilename" | "sourceKind" | "workspaces" | "activeId"
+>;
+
+export const useAgentStore = create<State & Actions>()(persist((set, get) => {
   const patch = (id: string, p: Partial<Workspace>) =>
     set((s) => ({
       workspaces: s.workspaces.map((w) => (w.id === id ? { ...w, ...p } : w)),
@@ -131,6 +151,9 @@ export const useAgentStore = create<State & Actions>((set, get) => {
     rawCV: "",
     bullets: [],
     sampleLabel: null,
+    sourceFilename: null,
+    sourceKind: null,
+    sourcePreviewUrl: null,
     providers: null,
     workspaces: [firstWorkspace],
     activeId: firstWorkspace.id,
@@ -140,6 +163,8 @@ export const useAgentStore = create<State & Actions>((set, get) => {
 
     hydrateSample: () => {
       import("./sample").then(({ SAMPLE_BIG_CV, SAMPLE_JOB }) => {
+        const previousPreview = get().sourcePreviewUrl;
+        if (previousPreview) URL.revokeObjectURL(previousPreview);
         const ws = makeWorkspace(
           SAMPLE_JOB,
           "Tailor this for the payments platform role and emphasise reliability and scale. Keep it to one page, ATS-friendly.",
@@ -148,6 +173,9 @@ export const useAgentStore = create<State & Actions>((set, get) => {
           rawCV: SAMPLE_BIG_CV,
           bullets: parseBigCV(SAMPLE_BIG_CV),
           sampleLabel: "Payments sample",
+          sourceFilename: "payments-resume.md",
+          sourceKind: "markdown",
+          sourcePreviewUrl: null,
           workspaces: [ws],
           activeId: ws.id,
         });
@@ -156,10 +184,15 @@ export const useAgentStore = create<State & Actions>((set, get) => {
 
     loadResume: () => {
       import("./rahul-resume").then(({ RAHUL_RESUME, RAHUL_DEFAULT_INTENT }) => {
+        const previousPreview = get().sourcePreviewUrl;
+        if (previousPreview) URL.revokeObjectURL(previousPreview);
         set((s) => ({
           rawCV: RAHUL_RESUME,
           bullets: parseBigCV(RAHUL_RESUME),
           sampleLabel: "Rahul Tuladhar (real resume)",
+          sourceFilename: "rahul-resume.md",
+          sourceKind: "markdown",
+          sourcePreviewUrl: null,
           workspaces: s.workspaces.map((w) =>
             cleared({ ...w, intent: w.intent || RAHUL_DEFAULT_INTENT }),
           ),
@@ -189,10 +222,24 @@ export const useAgentStore = create<State & Actions>((set, get) => {
           return;
         }
         const bullets = parseBigCV(data.text);
+        const extension = file.name.split(".").pop()?.toLowerCase();
+        const sourceKind = extension === "pdf" || file.type === "application/pdf"
+          ? "pdf"
+          : extension === "docx" || file.type.includes("wordprocessingml")
+            ? "docx"
+            : extension === "md" || extension === "markdown"
+              ? "markdown"
+              : "text";
+        const sourcePreviewUrl = sourceKind === "pdf" ? URL.createObjectURL(file) : null;
+        const previousPreview = get().sourcePreviewUrl;
+        if (previousPreview) URL.revokeObjectURL(previousPreview);
         set((s) => ({
           rawCV: data.text,
           bullets,
           sampleLabel: `${file.name} · ${bullets.length} bullets`,
+          sourceFilename: file.name,
+          sourceKind,
+          sourcePreviewUrl,
           workspaces: s.workspaces.map(cleared),
         }));
         appendLog(
@@ -208,11 +255,16 @@ export const useAgentStore = create<State & Actions>((set, get) => {
     },
 
     clearAll: () => {
+      const previousPreview = get().sourcePreviewUrl;
+      if (previousPreview) URL.revokeObjectURL(previousPreview);
       const ws = makeWorkspace();
       set({
         rawCV: "",
         bullets: [],
         sampleLabel: null,
+        sourceFilename: null,
+        sourceKind: null,
+        sourcePreviewUrl: null,
         workspaces: [ws],
         activeId: ws.id,
         flowOpen: false,
@@ -220,7 +272,17 @@ export const useAgentStore = create<State & Actions>((set, get) => {
       });
     },
 
-    setRawCV: (text) => set({ rawCV: text }),
+    setRawCV: (text) => {
+      const previousPreview = get().sourcePreviewUrl;
+      if (previousPreview) URL.revokeObjectURL(previousPreview);
+      set({
+        rawCV: text,
+        sampleLabel: null,
+        sourceFilename: "Edited resume.md",
+        sourceKind: "markdown",
+        sourcePreviewUrl: null,
+      });
+    },
 
     parseFromRaw: () => {
       const bullets = parseBigCV(get().rawCV);
@@ -234,6 +296,32 @@ export const useAgentStore = create<State & Actions>((set, get) => {
     toggleBullet: (id) =>
       set((s) => ({
         bullets: s.bullets.map((b) => (b.id === id ? { ...b, selected: !b.selected } : b)),
+      })),
+
+    updateBullet: (id, text) =>
+      set((s) => {
+        const original = s.bullets.find((b) => b.id === id);
+        return {
+          rawCV:
+            original?.source === "parsed" && original.text
+              ? s.rawCV.replace(original.text, text)
+              : s.rawCV,
+          bullets: s.bullets.map((b) =>
+            b.id === id ? { ...b, text, tags: inferTags(text) } : b,
+          ),
+        };
+      }),
+
+    updateCV: (cv) =>
+      set((s) => ({
+        workspaces: s.workspaces.map((w) => (w.id === s.activeId ? { ...w, cv } : w)),
+      })),
+
+    updateWorkspaceCV: (workspaceId, cv) =>
+      set((s) => ({
+        workspaces: s.workspaces.map((w) =>
+          w.id === workspaceId ? { ...w, cv, assessment: null } : w,
+        ),
       })),
 
     addBullet: (text) =>
@@ -294,6 +382,13 @@ export const useAgentStore = create<State & Actions>((set, get) => {
 
     setActiveId: (id) => set({ activeId: id, flowOpen: false, selectedNode: null }),
 
+    setWorkspaceTabName: (id, name) =>
+      set((s) => ({
+        workspaces: s.workspaces.map((w) =>
+          w.id === id ? { ...w, tabName: name || undefined } : w,
+        ),
+      })),
+
     setJob: (patchObj) =>
       set((s) => ({
         workspaces: s.workspaces.map((w) =>
@@ -304,6 +399,15 @@ export const useAgentStore = create<State & Actions>((set, get) => {
     setIntent: (intent) =>
       set((s) => ({
         workspaces: s.workspaces.map((w) => (w.id === s.activeId ? { ...w, intent } : w)),
+      })),
+
+    setVerbatimness: (verbatimness) =>
+      set((s) => ({
+        workspaces: s.workspaces.map((w) =>
+          w.id === s.activeId
+            ? { ...w, verbatimness: Math.max(0, Math.min(100, Math.round(verbatimness))) }
+            : w,
+        ),
       })),
 
     setFlowOpen: (open) => set({ flowOpen: open, selectedNode: open ? get().selectedNode : null }),
@@ -372,6 +476,7 @@ export const useAgentStore = create<State & Actions>((set, get) => {
       patch(id, cleared({ ...ws, status: "routing" }));
       appendLog(id, "info", `Pipeline start: ${selected.length} bullets -> ${ws.job.title || "role"}`);
 
+      let currentNode = "jev";
       try {
         appendLog(id, "jev", "Asking JevRouter to plan the capability order…");
         const jevRes = await fetch("/api/jev", {
@@ -393,8 +498,26 @@ export const useAgentStore = create<State & Actions>((set, get) => {
           `${jev.rationale}${jev.error ? `\n(CLI error: ${jev.error})` : ""}`,
         );
 
+        currentNode = "jev";
+        appendLog(id, "jev", `Scoring ${selected.length} source bullets with Jev relevance probabilities…`);
+        const scoreRes = await fetch("/api/score-bullets", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ bullets: state.bullets, job: ws.job }),
+        });
+        if (!scoreRes.ok) {
+          const detail = await scoreRes.json().catch(() => null) as { error?: string } | null;
+          throw new Error(detail?.error || `Jev bullet scoring failed: ${scoreRes.status}`);
+        }
+        const scored = (await scoreRes.json()) as { scores: Record<string, number>; provider: string };
+        patch(id, { relevanceScores: scored.scores });
+        for (const bullet of selected) {
+          appendLog(id, "jev", `Jev relevance ${Math.round((scored.scores[bullet.id] ?? 0.5) * 100)}%`, bullet.text);
+        }
+
         let research: string | null = null;
         if (jev.executionPlan.includes("company_research")) {
+          currentNode = "research";
           patch(id, { activeCapability: "company_research" });
           appendLog(id, "jev", "Capability company_research: grounding the role…");
           try {
@@ -414,6 +537,7 @@ export const useAgentStore = create<State & Actions>((set, get) => {
           }
         }
 
+        currentNode = "generate";
         patch(id, { activeCapability: "cv_generate", status: "generating" });
         appendLog(id, "llm", "Capability cv_generate: tailoring the CV…");
         const genRes = await fetch("/api/generate", {
@@ -421,21 +545,88 @@ export const useAgentStore = create<State & Actions>((set, get) => {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             bullets: state.bullets,
+            sourceSkills: extractProfile(state.rawCV).skills,
             job: ws.job,
             intent: ws.intent,
+            verbatimness: ws.verbatimness,
             plan: jev.executionPlan,
             research,
+            relevanceById: scored.scores,
           }),
         });
-        if (!genRes.ok) throw new Error(`Generate failed: ${genRes.status}`);
-        const genData = (await genRes.json()) as {
+        if (!genRes.ok) {
+          const errorBody = await genRes.json().catch(() => null) as { error?: string } | null;
+          throw new Error(errorBody?.error || `Generate failed: ${genRes.status}`);
+        }
+        if (!genRes.body) throw new Error("Generate stream was not available");
+
+        const reader = genRes.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        const generation: { result?: {
           cv: GeneratedCV;
           provider: string;
           model: string;
+          warning?: string;
+        } } = {};
+
+        const consumeEvent = (frame: string) => {
+          let event = "message";
+          const data: string[] = [];
+          for (const line of frame.split(/\r?\n/)) {
+            if (line.startsWith("event:")) event = line.slice(6).trim();
+            else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+          }
+          if (data.length === 0) return;
+
+          const payload = JSON.parse(data.join("\n")) as {
+            cv?: GeneratedCV;
+            provider?: string;
+            model?: string;
+            message?: string;
+            warning?: string;
+          };
+
+          if (event === "draft" && payload.cv) {
+            patch(id, {
+              cv: payload.cv,
+              usedMock: payload.provider === "mock",
+            });
+          } else if (event === "warning" && payload.message) {
+            appendLog(id, "warn", "Using the offline CV fallback", payload.message);
+          } else if (event === "complete" && payload.cv) {
+            generation.result = {
+              cv: payload.cv,
+              provider: payload.provider || "unknown",
+              model: payload.model || "unknown",
+              warning: payload.warning,
+            };
+          } else if (event === "error") {
+            throw new Error(payload.message || "CV generation stream failed");
+          }
         };
-        patch(id, { cv: genData.cv, usedMock: genData.provider === "mock" });
+
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value, { stream: !done });
+          const frames = buffer.split(/\r?\n\r?\n/);
+          buffer = frames.pop() ?? "";
+          for (const frame of frames) consumeEvent(frame);
+          if (done) break;
+        }
+        if (buffer.trim()) consumeEvent(buffer);
+        reader.releaseLock();
+        const genData = generation.result;
+        if (!genData) throw new Error("CV generation stream ended before the draft was complete");
+
+        patch(id, {
+          cv: genData.cv,
+          usedMock: genData.provider === "mock",
+          generationProvider: { provider: genData.provider, model: genData.model },
+        });
         appendLog(id, "llm", `Tailored CV generated via ${genData.provider}/${genData.model}`);
 
+        currentNode = "assess";
         patch(id, { activeCapability: "cv_assess", status: "assessing" });
         appendLog(id, "llm", "Capability cv_assess: scoring the CV…");
         const assessRes = await fetch("/api/assess", {
@@ -448,31 +639,55 @@ export const useAgentStore = create<State & Actions>((set, get) => {
           assessment: Assessment;
           provider: string;
         };
-        patch(id, { assessment: assessData.assessment, status: "done", activeCapability: null });
+        patch(id, { assessment: assessData.assessment, status: "done", activeCapability: null, pipelineErrorNode: undefined });
         appendLog(id, "info", `Done. Quality score ${assessData.assessment.overall}/100`);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        const current = get().workspaces.find((w) => w.id === id);
-        const failedNode = current?.activeCapability === "company_research"
-          ? "research"
-          : current?.activeCapability === "cv_generate"
-            ? "generate"
-            : current?.activeCapability === "cv_assess"
-              ? "assess"
-              : current?.jev
-                ? "generate"
-                : "jev";
-        patch(id, {
-          status: "error",
-          error: message,
-          activeCapability: null,
-          pipelineErrorNode: failedNode,
-        });
+        patch(id, { status: "error", error: message, activeCapability: null, pipelineErrorNode: currentNode });
         appendLog(id, "error", "Pipeline failed", message);
       }
     },
   };
-});
+}, {
+  name: "hirehand-workspaces-v1",
+  version: 1,
+  storage: createJSONStorage(() => localStorage),
+  skipHydration: true,
+  partialize: (state): PersistedState => ({
+    rawCV: state.rawCV,
+    bullets: state.bullets,
+    sampleLabel: state.sampleLabel,
+    sourceFilename: state.sourceFilename,
+    sourceKind: state.sourceKind,
+    workspaces: state.workspaces,
+    activeId: state.activeId,
+  }),
+  merge: (persisted, current) => {
+    const saved = persisted as Partial<PersistedState> | undefined;
+    const workspaces = (saved?.workspaces ?? current.workspaces).map((workspace) => {
+      if (!IN_PROGRESS_STATUSES.has(workspace.status)) return workspace;
+      return {
+        ...workspace,
+        status: workspace.cv ? "done" as const : "idle" as const,
+        activeCapability: null,
+        error: workspace.cv ? null : "Generation was interrupted. Run it again to continue.",
+      };
+    });
+
+    return {
+      ...current,
+      ...saved,
+      sourcePreviewUrl: null,
+      providers: null,
+      flowOpen: false,
+      selectedNode: null,
+      workspaces,
+      activeId: workspaces.some((workspace) => workspace.id === saved?.activeId)
+        ? saved?.activeId ?? current.activeId
+        : workspaces[0]?.id ?? current.activeId,
+    };
+  },
+}));
 
 /** The active workspace, or the first one as a fallback. */
 export function useActiveWorkspace(): Workspace {

@@ -4,7 +4,7 @@ import type { Assessment, BigCVBullet, GeneratedCV, JobTarget } from "./types";
 const CV_SCHEMA = `{
   "headline": "one punchy line positioning the candidate for THIS role",
   "summary": "2 sentence professional summary tailored to the role and intent",
-  "skills": ["8-14 concrete skills drawn from the Big CV, ordered by relevance to the job"],
+  "skills": ["concrete skills explicitly supported by the Big CV, ordered by relevance to the job"],
   "bullets": [
     {
       "id": "short id",
@@ -35,8 +35,10 @@ const ASSESS_SCHEMA = `{
 
 export function generatePrompt(input: {
   bullets: BigCVBullet[];
+  sourceSkills?: string[];
   job: JobTarget;
   intent: string;
+  verbatimness?: number;
   plan: string[];
   research?: string | null;
 }): { system: string; user: string } {
@@ -55,7 +57,7 @@ export function generatePrompt(input: {
         b.score - a.score ||
         Number(/\d/.test(b.b.text)) - Number(/\d/.test(a.b.text)),
     )
-    .slice(0, 14)
+    .slice(0, 20)
     .map((x) => x.b);
 
   const evidence = ranked
@@ -63,17 +65,22 @@ export function generatePrompt(input: {
     .join("\n");
 
   // Keep the job text within a predictable token budget.
-  const description = (input.job.description || "(not given)").slice(0, 2600);
+  const description = (input.job.description || "(not given)").slice(0, 6000);
+  const verbatimness = Math.max(0, Math.min(100, Math.round(input.verbatimness ?? 0)));
 
   return {
     system: `You are an expert CV writer and ATS optimisation engine for a personal career agent.
 Rules:
 - Use ONLY evidence present in the Big CV bullets. Never invent employers, titles, dates, metrics or tools.
+- Only list a skill when it appears in the supplied source skills or selected experience evidence. Never copy a requirement from the job description into the candidate's skills unless the source supports it.
 - Keep every number from the source verbatim.
-- Rewrite bullets to mirror the job description's language and priorities.
+- Rewrite bullets to reflect the job description's priorities while preserving the source meaning and scope. Do not claim adjacent tools, responsibilities, scale or outcomes that the source does not state.
 - Prefer strong verbs, concrete outcomes, and the STAR pattern compressed to one line.
-- Return up to 6 strongest experience bullets. If fewer than 5 are clearly relevant, use the strongest remaining original resume points to make the one-page resume feel complete; preserve their facts and numbers.
-- Keep the summary to two concise sentences. This CV is exported as a one-page resume; do not add a cover letter to the resume body.
+- Obey the requested source-wording preservation level exactly. A verbatim bullet must have the same text as its source Big CV bullet, character-for-character (other than surrounding whitespace).
+- Choose evidence for the role's actual responsibilities, not broad keyword overlap alone. When equally relevant points come from different roles, show that range and avoid repeating the same kind of achievement.
+- Make the two-sentence summary specific to the role and include a concrete, source-supported outcome. Avoid generic filler.
+- Return up to 10 strong, distinct experience bullets that fit the one-page limit. Prioritize relevant evidence; do not add tangential bullets to reach a quota or pad a shorter resume.
+- Use the available one-page space for distinct relevant evidence while keeping bullets concise and scannable. This CV is exported as a one-page resume; do not add a cover letter to the resume body.
 - Return ONLY a single minified JSON object. No markdown, no commentary, no code fences.
 Schema:
 ${CV_SCHEMA}`,
@@ -85,11 +92,17 @@ ${description}
 
 USER INTENT (highest priority): ${input.intent || "Tailor broadly to the role."}
 
+SOURCE-WORDING PRESERVATION: ${verbatimness}%
+Make approximately ${verbatimness}% of output bullets verbatim copies of their cited Big CV source bullet. The remaining bullets may be rewritten for the target role, but must still use only the cited source evidence. At 100%, every output bullet must be copied exactly from its source; at 0%, you may rewrite all output bullets.
+
 CAPABILITY PLAN (from JevRouter): ${input.plan.join(" -> ")}
 
 ${input.research ? `ROLE RESEARCH (context only, not CV evidence):\n${input.research}\n` : ""}
 BIG CV EVIDENCE (the only source of truth):
 ${evidence || "(no bullets selected)"}
+
+EXPLICIT SOURCE SKILLS (also grounded evidence; only use these and skills stated in the experience bullets):
+${input.sourceSkills?.join(", ") || "(none supplied)"}
 
 Produce the tailored CV JSON now.`,
   };

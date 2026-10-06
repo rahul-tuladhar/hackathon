@@ -10,12 +10,14 @@
     "jev": "npx --yes github:BillionsBobby/JevRouter serve --provider demo --port 8787"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^4.0.103",
     "@ai-sdk/react": "^4.0.130",
     "@react-pdf/renderer": "^4.9.0",
     "@streamdown/cjk": "^1.0.4",
     "@streamdown/code": "^2.0.0",
     "@streamdown/math": "^1.0.3",
     "@streamdown/mermaid": "^1.0.3",
+    "@tabler/icons-react": "^3.48.0",
     "ai": "^7.0.127",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -38,6 +40,7 @@
     "tailwind-merge": "^3.7.0",
     "unpdf": "^1.8.1",
     "use-stick-to-bottom": "^1.1.6",
+    "zod": "^3.25.76",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

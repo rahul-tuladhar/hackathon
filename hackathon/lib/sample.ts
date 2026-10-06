@@ -51,36 +51,68 @@ Nice to have
 - Familiarity with reconciliation and ledgering.`,
 };
 
-/** Naive parser: turn a raw dump into candidate bullets. */
+/** Turn a raw dump or line-wrapped PDF extraction into candidate bullets. */
 export function parseBigCV(raw: string): BigCVBullet[] {
-  const lines = raw
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean);
-
   const bullets: BigCVBullet[] = [];
   let section: "experience" | "summary" | "education" | "skills" | "certifications" = "experience";
-  for (const line of lines) {
+  let currentBullet = "";
+
+  const flushBullet = () => {
+    if (section === "experience" && currentBullet.length >= 24) {
+      bullets.push({
+        id: `b${bullets.length + 1}`,
+        text: currentBullet,
+        tags: inferTags(currentBullet),
+        source: "parsed",
+        selected: true,
+      });
+    }
+    currentBullet = "";
+  };
+
+  for (const rawLine of raw.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushBullet();
+      continue;
+    }
+
     const isBullet = /^[-*•●]/.test(line);
     const body = line.replace(/^[-*•●]\s*/, "").trim();
-    if (!isBullet) {
-      if (/^(summary|profile|objective)\s*:?$/i.test(line)) section = "summary";
-      else if (/^(education|academic background)\s*:?$/i.test(line)) section = "education";
-      else if (/^(technical skills|skills|technologies)\s*:?$/i.test(line)) section = "skills";
-      else if (/^(certifications?|licenses)\s*:?$/i.test(line)) section = "certifications";
-      else if (/\s+[—–]\s+/.test(line)) section = "experience";
+
+    if (isBullet) {
+      flushBullet();
+      if (section === "experience") currentBullet = body;
+      continue;
     }
-    // Skip short headers / non-sentences.
-    if (!isBullet || section !== "experience") continue;
-    if (body.length < 24) continue;
-    bullets.push({
-      id: `b${bullets.length + 1}`,
-      text: body,
-      tags: inferTags(body),
-      source: "parsed",
-      selected: true,
-    });
+
+    if (/^(summary|profile|objective)\s*:?$/i.test(line)) {
+      flushBullet();
+      section = "summary";
+    } else if (/^(work experience|professional experience|experience|employment history)\s*:?$/i.test(line)) {
+      flushBullet();
+      section = "experience";
+    } else if (/^(education|academic background)\s*:?$/i.test(line)) {
+      flushBullet();
+      section = "education";
+    } else if (/^(technical skills|skills|technologies)\s*:?$/i.test(line)) {
+      flushBullet();
+      section = "skills";
+    } else if (/^(certifications?|licenses)\s*:?$/i.test(line)) {
+      flushBullet();
+      section = "certifications";
+    } else if (
+      line.includes("|") ||
+      (/\s+[—–]\s+/.test(line) && !/\b(?:19|20)\d{2}\s+[—–]\s+/.test(line))
+    ) {
+      flushBullet();
+      section = "experience";
+    } else if (section === "experience" && currentBullet) {
+      // PDF text extraction wraps long bullets onto unmarked continuation lines.
+      currentBullet = `${currentBullet} ${line}`;
+    }
   }
+  flushBullet();
 
   // Fall back to sentence splitting if the dump has no bullet markers.
   if (bullets.length === 0) {

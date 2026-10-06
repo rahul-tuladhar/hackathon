@@ -1,21 +1,24 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { researchCompany } from "./company";
-import { researchPeople } from "./people";
+import { researchPeople } from "./people-runs";
 import type { Job, JobResearch } from "./types";
 
+export { getPeopleStatus, startAllPeopleRuns, type PeopleStatus } from "./people-runs";
 export { normalizeJob, normalizeJobs } from "./jobs";
 export type * from "./types";
 
 // Disk cache so re-running the demo does not burn Exa credits.
-const CACHE_DIR = path.join(process.cwd(), ".cache", "research");
+// Vercel's filesystem is read-only apart from the (per-instance) temp dir.
+const CACHE_DIR = path.join(process.env.VERCEL ? tmpdir() : process.cwd(), ".cache", "research");
 
 function cacheFile(job: Job) {
   const slug = `${job.company}-${job.title}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 80);
   return path.join(CACHE_DIR, `${slug}-${job.id}.json`);
 }
 
-async function readCache(job: Job): Promise<JobResearch | undefined> {
+export async function getCachedResearch(job: Job): Promise<JobResearch | undefined> {
   try {
     return JSON.parse(await readFile(cacheFile(job), "utf8")) as JobResearch;
   } catch {
@@ -30,7 +33,7 @@ async function writeCache(result: JobResearch) {
 
 export async function researchJob(job: Job, opts: { refresh?: boolean } = {}): Promise<JobResearch> {
   if (!opts.refresh) {
-    const cached = await readCache(job);
+    const cached = await getCachedResearch(job);
     if (cached) return cached;
   }
 

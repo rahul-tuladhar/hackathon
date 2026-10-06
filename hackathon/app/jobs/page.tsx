@@ -4,7 +4,9 @@ import { useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import jobs from "../jobs";
 import JobResearch from "../JobResearch";
+import JobRulesEval from "../JobRulesEval";
 import JobSummary from "../JobSummary";
+import FinalOutput from "../FinalOutput";
 
 function formatComp([min, max]: [number, number]) {
   const k = (n: number) => `$${Math.round(n / 1000)}K`;
@@ -18,25 +20,17 @@ export default function JobsPage() {
   const selected = selectedId ? jobs[Number(selectedId)] : null;
 
   return (
-    <Group
-      orientation="horizontal"
-      className="flex-1 bg-zinc-50 font-sans text-zinc-900 dark:bg-black dark:text-zinc-100"
-    >
+    <div className="flex min-h-0 flex-1 bg-zinc-50 font-sans text-zinc-900 dark:bg-black dark:text-zinc-100">
+    <Group orientation="horizontal" className="h-full w-full">
       {/* Sidebar */}
       <Panel
         defaultSize="320px"
         minSize="240px"
         maxSize="480px"
-        className="overflow-y-auto"
+        className="overflow-y-auto no-scrollbar"
       >
-        <aside className="h-full border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="border-b border-zinc-200 px-5 py-4 dark:border-zinc-800">
-          <h1 className="text-lg font-semibold">Jobs</h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
-            {jobEntries.length} {jobEntries.length === 1 ? "opening" : "openings"}
-          </p>
-        </div>
-        <ul>
+        <aside className="h-full">
+        <ul className="flex flex-col gap-2 p-3">
           {jobEntries.map(([id, job]) => {
             const isActive = id === selectedId;
             return (
@@ -44,10 +38,10 @@ export default function JobsPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedId(id)}
-                  className={`w-full border-b border-zinc-100 px-5 py-4 text-left transition-colors dark:border-zinc-900 ${
+                  className={`w-full rounded-xl border px-4 py-3 text-left transition-colors ${
                     isActive
-                      ? "border-l-2 border-l-blue-600 bg-blue-50 dark:bg-blue-950/40"
-                      : "hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                      ? "border-blue-500 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/40"
+                      : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
                   }`}
                 >
                   <p className="font-medium leading-snug">{job.title}</p>
@@ -65,7 +59,7 @@ export default function JobsPage() {
         </aside>
       </Panel>
 
-      <Separator className="w-px bg-zinc-200 transition-colors hover:bg-blue-500 data-[separator=active]:bg-blue-500 data-[separator=focus]:bg-blue-500 dark:bg-zinc-800" />
+      <Separator className="w-px bg-zinc-200 dark:bg-zinc-800" />
 
       {/* Main detail panel */}
       <Panel className="overflow-y-auto">
@@ -83,11 +77,11 @@ export default function JobsPage() {
             </p>
             <JobSummary key={`summary-${selectedId}`} jobId={Number(selectedId)} />
 
-            <div className="mt-8 whitespace-pre-line text-[15px] leading-7 text-zinc-700 dark:text-zinc-300">
-              {selected.description.trim()}
-            </div>
+            <JobRulesEval key={`rules-${selectedId}`} jobId={Number(selectedId)} />
 
-            <JobResearch key={selectedId} company={selected.company} />
+            <FinalOutput key={`final-output-${selectedId}`} jobId={Number(selectedId)} job={selected} />
+
+            <JobResearch key={selectedId} jobId={Number(selectedId)} company={selected.company} />
           </div>
         ) : (
           <div className="flex h-full items-center justify-center text-zinc-500">
@@ -97,5 +91,6 @@ export default function JobsPage() {
       </main>
       </Panel>
     </Group>
+    </div>
   );
 }

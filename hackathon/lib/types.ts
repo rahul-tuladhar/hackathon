@@ -161,9 +161,17 @@ export type ProviderStatus = {
  */
 export type Workspace = {
   id: string;
+  tabName?: string;
   job: JobTarget;
   intent: string;
+  /**
+   * How much of the tailored CV's bullet wording must remain exactly as it
+   * appeared in the source CV. 0 allows a full rewrite; 100 preserves every
+   * generated source bullet word-for-word.
+   */
+  verbatimness: number;
   jev: JevPlan | null;
+  relevanceScores?: Record<string, number>;
   cv: GeneratedCV | null;
   assessment: Assessment | null;
   research: string | null;
@@ -173,5 +181,6 @@ export type Workspace = {
   pipelineErrorNode?: string;
   logs: LogEntry[];
   usedMock: boolean;
+  generationProvider: { provider: string; model: string } | null;
   error: string | null;
 };

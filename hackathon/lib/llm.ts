@@ -24,7 +24,8 @@ export type Resolved = {
 
 const NEON_BASE = process.env.NEON_AI_GATEWAY_BASE_URL || "";
 const NEON_TOKEN = process.env.NEON_AI_GATEWAY_TOKEN || "";
-const NEON_MODEL = process.env.NEON_MODEL || "gpt-5-mini";
+const NEON_MODEL =
+  process.env.NEON_AI_GATEWAY_MODEL || process.env.NEON_MODEL || "gpt-5-mini";
 
 const VERCEL_KEY =
   process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_AI_GATEWAY_API_KEY || "";
@@ -158,7 +159,7 @@ async function callProvider(
   user: string,
   opts: { maxTokens?: number; temperature?: number },
 ): Promise<ChatResult> {
-  const body = {
+  const body: Record<string, unknown> = {
     model: p.model,
     messages: [
       { role: "system", content: system },
@@ -180,22 +181,48 @@ async function callProvider(
       signal: AbortSignal.timeout(180_000),
     });
 
-  let res = await send(body);
+  let payload = { ...body };
+  let res: Response | undefined;
 
-  // Some OpenAI models reject max_tokens and want max_completion_tokens.
-  if (res.status === 400) {
+  // Gateways wrap models with different OpenAI-compatible parameter support.
+  // Retry known validation errors by omitting temperature or renaming the
+  // token limit, while leaving normal provider failures untouched.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    res = await send(payload);
+    if (res.ok) break;
+
     const errText = await res.text().catch(() => "");
-    if (/max_completion_tokens|max_tokens/i.test(errText)) {
-      const { max_tokens, ...rest } = body;
-      res = await send({ ...rest, max_completion_tokens: max_tokens });
-    } else {
+    if (res.status !== 400) {
+      throw new Error(`${p.id} ${res.status}: ${errText.slice(0, 200)}`);
+    }
+
+    const retryPayload = { ...payload };
+    let adjusted = false;
+
+    if (
+      "temperature" in retryPayload &&
+      /temperature/i.test(errText) &&
+      /(unsupported|does not support|only the default|must be)/i.test(errText)
+    ) {
+      delete retryPayload.temperature;
+      adjusted = true;
+    }
+
+    if (/max_completion_tokens|max_tokens/i.test(errText) && "max_tokens" in retryPayload) {
+      retryPayload.max_completion_tokens = retryPayload.max_tokens;
+      delete retryPayload.max_tokens;
+      adjusted = true;
+    }
+
+    if (!adjusted || attempt === 2) {
       throw new Error(`${p.id} 400: ${errText.slice(0, 200)}`);
     }
+    payload = retryPayload;
   }
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    throw new Error(`${p.id} ${res.status}: ${errText.slice(0, 200)}`);
+  if (!res?.ok) {
+    const errText = await res?.text().catch(() => "") ?? "request failed";
+    throw new Error(`${p.id} ${res?.status ?? "unknown"}: ${errText.slice(0, 200)}`);
   }
 
   const data = (await res.json()) as {
@@ -230,6 +257,147 @@ export async function chatComplete(
     try {
       return await callProvider(p, system, user, opts);
     } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+  throw new Error(`All LLM providers failed. ${errors.join(" | ")}`);
+}
+
+async function* readChatDeltas(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finished = false;
+
+  try {
+    while (!finished) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      const frames = buffer.split(/\r?\n\r?\n/);
+      buffer = frames.pop() ?? "";
+
+      for (const frame of frames) {
+        const data = frame
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith("data:"))
+          .map((line) => line.slice(5).trim())
+          .join("\n");
+        if (!data) continue;
+        if (data === "[DONE]") {
+          finished = true;
+          break;
+        }
+
+        try {
+          const chunk = JSON.parse(data) as {
+            choices?: Array<{
+              delta?: {
+                content?: string | Array<{ type?: string; text?: string }>;
+                reasoning_content?: string;
+              };
+            }>;
+          };
+          const delta = chunk.choices?.[0]?.delta;
+          if (typeof delta?.content === "string" && delta.content) {
+            yield delta.content;
+          } else if (Array.isArray(delta?.content)) {
+            const text = delta.content.map((part) => part.text ?? "").join("");
+            if (text) yield text;
+          }
+        } catch {
+          // Ignore non-JSON provider keepalives and continue reading the stream.
+        }
+      }
+
+      if (done) {
+        const finalFrame = buffer.trim();
+        if (finalFrame.startsWith("data:") && finalFrame !== "data: [DONE]") {
+          const data = finalFrame.slice(5).trim();
+          try {
+            const chunk = JSON.parse(data) as {
+              choices?: Array<{ delta?: { content?: string } }>;
+            };
+            const delta = chunk.choices?.[0]?.delta;
+            if (delta?.content) yield delta.content;
+          } catch {
+            // A trailing incomplete event is not useful to the JSON parser.
+          }
+        }
+        finished = true;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export async function openChatCompletionStream(
+  system: string,
+  user: string,
+  opts: { maxTokens?: number; signal?: AbortSignal } = {},
+): Promise<{ chunks: AsyncIterable<string>; provider: string; model: string }> {
+  const chain = await withLocalFallback(providerChain());
+  if (chain.length === 0) throw new Error("No LLM provider configured");
+
+  const errors: string[] = [];
+  for (const candidate of chain) {
+    const provider = await resolveModel(candidate);
+    if (!provider) {
+      errors.push(`${candidate.id}: unavailable`);
+      continue;
+    }
+
+    const body = {
+      model: provider.model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      temperature: 0.2,
+      max_tokens: opts.maxTokens ?? 4000,
+      stream: true,
+    };
+    const signal = opts.signal
+      ? AbortSignal.any([opts.signal, AbortSignal.timeout(180_000)])
+      : AbortSignal.timeout(180_000);
+    const send = (payload: Record<string, unknown>) =>
+      fetch(`${provider.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${provider.apiKey}`,
+        },
+        body: JSON.stringify(payload),
+        signal,
+      });
+
+    try {
+      let payload: Record<string, unknown> = body;
+      let response = await send(payload);
+      for (let retry = 0; response.status === 400 && retry < 2; retry += 1) {
+        const errText = await response.text().catch(() => "");
+        if ("temperature" in payload && /temperature/i.test(errText)) {
+          delete payload.temperature;
+        } else if ("max_tokens" in payload && /max_completion_tokens|max_tokens/i.test(errText)) {
+          const { max_tokens, ...rest } = payload;
+          payload = { ...rest, max_completion_tokens: max_tokens };
+        } else {
+          throw new Error(`${provider.id} 400: ${errText.slice(0, 200)}`);
+        }
+        response = await send(payload);
+      }
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        throw new Error(`${provider.id} ${response.status}: ${errText.slice(0, 200)}`);
+      }
+      if (!response.body) throw new Error(`${provider.id} returned an empty stream`);
+      return {
+        chunks: readChatDeltas(response.body),
+        provider: provider.id,
+        model: provider.model,
+      };
+    } catch (err) {
+      if (opts.signal?.aborted) throw err;
       errors.push(err instanceof Error ? err.message : String(err));
     }
   }
@@ -289,11 +457,29 @@ export async function jsonComplete<T>(
   user: string,
   opts: { maxTokens?: number } = {},
 ): Promise<{ data: T; provider: string; model: string }> {
-  const { text, provider, model } = await chatComplete(system, user, {
-    maxTokens: opts.maxTokens ?? 2600,
+  const maxTokens = opts.maxTokens ?? 2600;
+  const first = await chatComplete(system, user, {
+    maxTokens,
   });
-  const data = extractJson(text) as T;
-  return { data, provider, model };
+
+  try {
+    return {
+      data: extractJson(first.text) as T,
+      provider: first.provider,
+      model: first.model,
+    };
+  } catch {
+    const retry = await chatComplete(
+      `${system}\nThe previous response was not valid JSON. Follow the schema exactly and return one complete JSON object.`,
+      `${user}\n\nReturn valid, complete JSON only. Do not use markdown fences or commentary.`,
+      { maxTokens: Math.max(6000, Math.ceil(maxTokens * 1.5)), temperature: 0 },
+    );
+    return {
+      data: extractJson(retry.text) as T,
+      provider: retry.provider,
+      model: retry.model,
+    };
+  }
 }
 
 export async function llmHealth(): Promise<ProviderStatus["llm"]> {

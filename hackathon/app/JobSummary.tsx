@@ -49,26 +49,16 @@ export default function JobSummary({ jobId }: { jobId: number }) {
   }, [jobId]);
 
   return (
-    <section className="mt-8 rounded-xl border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900/40">
-      <div className="flex items-center gap-2">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-zinc-500">
-          AI Summary
-        </h3>
-        {loading && <span className="text-sm text-zinc-500">Summarizing…</span>}
-      </div>
+    <div className="mt-6">
       {error ? (
-        <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">
-          {error}
-        </p>
+        <p className="text-sm text-amber-600 dark:text-amber-400">{error}</p>
       ) : summary ? (
-        <div className="mt-3 text-[15px] leading-7 text-zinc-700 dark:text-zinc-300">
+        <div className="text-[15px] leading-7 text-zinc-700 dark:text-zinc-300">
           <Markdown>{summary}</Markdown>
         </div>
       ) : (
-        !loading && (
-          <p className="mt-3 text-sm text-zinc-500">No summary available.</p>
-        )
+        loading && <p className="text-sm text-zinc-500">Summarizing…</p>
       )}
-    </section>
+    </div>
   );
 }

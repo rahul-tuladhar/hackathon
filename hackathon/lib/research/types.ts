@@ -47,6 +47,8 @@ export type Contact = {
   title?: string;
   role: ContactRole;
   profileUrl: string;
+  email?: string;
+  photoUrl?: string;
   location?: string;
   // 0-100, higher means contact first.
   priority: number;
