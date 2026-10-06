@@ -33,8 +33,7 @@ app/
   page.tsx                 redirects to the source resume editor
   resume/page.tsx          editable source resume and PDF preview
   workspace/page.tsx       job tabs · document · pipeline overlay
-  JobsResume.tsx           JEV-scored one-page resume generation on /jobs
-  FinalOutput.tsx          edit and export each job's generated resume
+  FinalOutput.tsx          generate, score, edit, preview and export each job's resume
   api/jev/route.ts         JevRouter plan (HTTP → CLI → policy fallback)
   api/generate/route.ts    tailored CV (LLM, deterministic mock fallback)
   api/assess/route.ts      quality assessment (LLM, deterministic mock fallback)

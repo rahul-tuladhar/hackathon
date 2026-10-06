@@ -4,7 +4,6 @@ import { useState } from "react";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import jobs from "../jobs";
 import JobResearch from "../JobResearch";
-import JobsResume from "../JobsResume";
 import JobRulesEval from "../JobRulesEval";
 import JobSummary from "../JobSummary";
 import FinalOutput from "../FinalOutput";
@@ -79,8 +78,6 @@ export default function JobsPage() {
             <JobSummary key={`summary-${selectedId}`} jobId={Number(selectedId)} />
 
             <JobRulesEval key={`rules-${selectedId}`} jobId={Number(selectedId)} />
-
-            <JobsResume key={`resume-${selectedId}`} jobId={Number(selectedId)} />
 
             <FinalOutput key={`final-output-${selectedId}`} jobId={Number(selectedId)} job={selected} />
 

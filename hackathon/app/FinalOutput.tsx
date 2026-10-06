@@ -1,11 +1,12 @@
 "use client";
 
-import { createElement, useEffect, useState } from "react";
+import { createElement, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowDownToLine, FileText, LoaderCircle, Pencil, Plus, RefreshCw, Save, X } from "lucide-react";
 import { extractProfile } from "@/lib/resume-profile";
 import { useAgentStore } from "@/lib/store";
 import type { GeneratedCV, GeneratedBullet } from "@/lib/types";
+import { buildRawResume, useResumeStore } from "./resume/resume-store";
 
 type PdfState = {
   workspaceId: string;
@@ -29,13 +30,15 @@ export default function FinalOutput({
   const bullets = useAgentStore((state) => state.bullets);
   const updateWorkspaceCV = useAgentStore((state) => state.updateWorkspaceCV);
   const openBoardJob = useAgentStore((state) => state.openBoardJob);
+  const experiences = useResumeStore((state) => state.experiences);
+  const sourceResume = useMemo(() => buildRawResume(experiences), [experiences]);
+  const sourceBullets = experiences.flatMap((experience) => experience.bullets).filter((bullet) => bullet.trim());
   const workspace =
     workspaces.find((item) => item.job.sourceId === String(jobId)) ??
     workspaces.find((item) => item.job.title === job.title && item.job.company === job.company);
   const cv = workspace?.cv ?? null;
   const workspaceId = workspace?.id;
   const jobTarget = workspace?.job;
-  const selectedBullets = bullets.filter((bullet) => bullet.selected).length;
   const busy = workspace?.status === "routing" || workspace?.status === "generating" || workspace?.status === "assessing";
   const [pdf, setPdf] = useState<PdfState | null>(null);
   const [editing, setEditing] = useState(false);
@@ -82,9 +85,12 @@ export default function FinalOutput({
   const fileName = `${safeFilePart(extractProfile(rawCV).name) || "Resume"}_Resume_${safeFilePart(job.company) || "Job"}.pdf`;
 
   const generate = () => {
-    if (busy || selectedBullets === 0) return;
+    if (busy || sourceBullets.length === 0) return;
     setEditing(false);
     setDraft(null);
+    const store = useAgentStore.getState();
+    store.setRawCV(sourceResume);
+    store.parseFromRaw();
     openBoardJob(String(jobId));
     void useAgentStore.getState().runPipeline();
   };
@@ -160,7 +166,7 @@ export default function FinalOutput({
           <button
             type="button"
             onClick={generate}
-            disabled={busy || selectedBullets === 0 || editing}
+            disabled={busy || sourceBullets.length === 0 || editing}
             className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {busy ? <LoaderCircle className="size-4 animate-spin" /> : cv ? <RefreshCw className="size-4" /> : <FileText className="size-4" />}
@@ -169,9 +175,9 @@ export default function FinalOutput({
         </div>
       </div>
 
-      {!cv && !busy && selectedBullets === 0 && (
+      {!cv && !busy && sourceBullets.length === 0 && (
         <p className="mt-4 text-sm text-amber-700 dark:text-amber-400">
-          Load a resume with selected experience before generating a tailored PDF. <Link href="/resume" className="underline underline-offset-2">Open the resume workspace</Link>
+          Add experience to your source resume before generating a tailored PDF. <Link href="/resume" className="underline underline-offset-2">Open the resume workspace</Link>
         </p>
       )}
       {cv && workspace?.usedMock && (
@@ -186,6 +192,26 @@ export default function FinalOutput({
       )}
       {workspace?.error && workspace.status === "error" && (
         <p role="alert" className="mt-4 text-sm text-rose-600 dark:text-rose-400">{workspace.error}</p>
+      )}
+
+      {workspace?.relevanceScores && bullets.length > 0 && (
+        <details className="mt-4 rounded-lg border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-950">
+          <summary className="cursor-pointer text-sm font-medium text-zinc-700 dark:text-zinc-200">
+            Jev relevance scores · {bullets.length} source bullets
+          </summary>
+          <ul className="mt-3 space-y-2">
+            {[...bullets]
+              .sort((left, right) => (workspace.relevanceScores?.[right.id] ?? 0) - (workspace.relevanceScores?.[left.id] ?? 0))
+              .map((bullet) => (
+                <li key={bullet.id} className="flex gap-3 text-sm leading-5 text-zinc-600 dark:text-zinc-300">
+                  <span className="w-10 shrink-0 font-medium tabular-nums text-zinc-500">
+                    {Math.round((workspace.relevanceScores?.[bullet.id] ?? 0) * 100)}%
+                  </span>
+                  <span>{bullet.text}</span>
+                </li>
+              ))}
+          </ul>
+        </details>
       )}
 
       {editing && draft && workspace && (
