@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { AccountMenu } from "@/components/AccountMenu";
 import { useAgentStore } from "@/lib/store";
 
@@ -9,12 +10,27 @@ const links = [
   { href: "/jobs", label: "Jobs" },
   { href: "/workspace", label: "Workspace" },
   { href: "/rules", label: "Rules" },
+  { href: "/profile", label: "Profile & memory" },
 ];
 
 export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
   const loadResume = useAgentStore((s) => s.loadResume);
+
+  useEffect(() => {
+    const handleNavigate = (event: Event) => {
+      const page = (event as CustomEvent<string>).detail;
+      const routes: Record<string, string> = {
+        jobs: "/jobs",
+        workspace: "/workspace",
+        profile: "/profile",
+      };
+      if (page in routes) router.push(routes[page]);
+    };
+    window.addEventListener("tailor:navigate", handleNavigate);
+    return () => window.removeEventListener("tailor:navigate", handleNavigate);
+  }, [router]);
 
   const openResume = () => {
     loadResume();

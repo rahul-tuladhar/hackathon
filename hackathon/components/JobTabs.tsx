@@ -213,7 +213,7 @@ export function JobTabs() {
       </div>
 
       <button
-        onClick={runPipeline}
+        onClick={() => void runPipeline()}
         disabled={busy}
         className="mb-1 shrink-0 rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
       >

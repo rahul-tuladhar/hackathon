@@ -106,6 +106,7 @@ type Actions = {
   refreshProviders: () => Promise<void>;
   // workspaces
   addWorkspace: (job?: JobTarget) => void;
+  updateWorkspace: (id: string, update: { tabName?: string | null; job?: Partial<JobTarget>; intent?: string }) => void;
   openBoardJob: (boardId: string) => void;
   removeWorkspace: (id: string) => void;
   setActiveId: (id: string) => void;
@@ -348,6 +349,18 @@ export const useAgentStore = create<State & Actions>()(persist((set, get) => {
       const ws = makeWorkspace(job ?? BLANK_JOB, get().workspaces[0]?.intent ?? "");
       set((s) => ({ workspaces: [...s.workspaces, ws], activeId: ws.id }));
     },
+
+    updateWorkspace: (id, update) =>
+      set((s) => ({
+        workspaces: s.workspaces.map((workspace) => workspace.id === id
+          ? {
+              ...workspace,
+              ...(update.tabName !== undefined ? { tabName: update.tabName || undefined } : {}),
+              ...(update.intent !== undefined ? { intent: update.intent } : {}),
+              ...(update.job ? { job: { ...workspace.job, ...update.job } } : {}),
+            }
+          : workspace),
+      })),
 
     openBoardJob: (boardId) => {
       const existing = get().workspaces.find((w) => w.job.sourceId === boardId);

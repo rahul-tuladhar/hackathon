@@ -511,7 +511,7 @@ function TargetSection() {
         n={2}
         title="Target job"
         actions={
-          <button onClick={runPipeline} disabled={busy} className={btnPrimary}>
+          <button onClick={() => void runPipeline()} disabled={busy} className={btnPrimary}>
             {busy ? "Running…" : "Run agent"}
           </button>
         }

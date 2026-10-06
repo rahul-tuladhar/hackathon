@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.103",
+    "@ai-sdk/openai-compatible": "^3.0.64",
     "@ai-sdk/react": "^4.0.130",
     "@react-pdf/renderer": "^4.9.0",
     "@streamdown/cjk": "^1.0.4",
