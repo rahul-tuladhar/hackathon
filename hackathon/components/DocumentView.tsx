@@ -2,6 +2,7 @@
 
 import { createElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import jobs from "@/app/jobs";
+import Markdown from "@/app/Markdown";
 import { activeNodeKey, FLOW_NODES, nodeState } from "@/lib/pipeline";
 import { extractProfile } from "@/lib/resume-profile";
 import { useActiveWorkspace, useAgentStore } from "@/lib/store";
@@ -223,6 +224,10 @@ function SectionHeader({
 function ResumeSection() {
   const rawCV = useAgentStore((s) => s.rawCV);
   const bullets = useAgentStore((s) => s.bullets);
+  const sampleLabel = useAgentStore((s) => s.sampleLabel);
+  const sourceFilename = useAgentStore((s) => s.sourceFilename);
+  const sourceKind = useAgentStore((s) => s.sourceKind);
+  const sourcePreviewUrl = useAgentStore((s) => s.sourcePreviewUrl);
   const setRawCV = useAgentStore((s) => s.setRawCV);
   const parseFromRaw = useAgentStore((s) => s.parseFromRaw);
   const toggleBullet = useAgentStore((s) => s.toggleBullet);
@@ -235,9 +240,11 @@ function ResumeSection() {
   const [bulletDraft, setBulletDraft] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [editingSource, setEditingSource] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const selected = bullets.filter((b) => b.selected).length;
+  const sourceName = sourceFilename ?? sampleLabel ?? "No resume loaded";
 
   const startEditingBullet = (id: string, text: string) => {
     setEditingBulletId(id);
@@ -269,63 +276,76 @@ function ResumeSection() {
   };
 
   return (
-    <section className="border-t border-zinc-200 pt-8 dark:border-zinc-800">
-      <SectionHeader
-        id="resume"
-        n={1}
-        title="Big CV"
-        actions={
-          <div className="flex items-center gap-2">
-            <Badge tone="emerald">
-              {selected}/{bullets.length} in play
-            </Badge>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".pdf,.docx,.txt,.md,.markdown,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown"
-              className="hidden"
-              onChange={(e) => handleFile(e.target.files?.[0])}
-            />
-            <button onClick={() => fileRef.current?.click()} disabled={busy} className={btnPrimary}>
-              {busy ? "Parsing…" : "Upload resume"}
-            </button>
-            <button onClick={parseFromRaw} className={btnSecondary}>
-              Parse
-            </button>
-          </div>
-        }
+    <section id="resume" className="border-t border-zinc-200 pt-6 dark:border-zinc-800">
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".pdf,.docx,.txt,.md,.markdown,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown"
+        className="hidden"
+        onChange={(e) => handleFile(e.target.files?.[0])}
       />
-
-      <div
-        className="relative mb-4"
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          handleFile(e.dataTransfer.files?.[0]);
-        }}
-      >
-        <textarea
-          value={rawCV}
-          onChange={(e) => setRawCV(e.target.value)}
-          spellCheck={false}
-          placeholder="Drop a resume here (PDF, DOCX, TXT, MD), or paste your full career dump: roles, bullets, numbers, tools, anything."
-          className="h-40 w-full resize-y rounded-xl border border-zinc-300 bg-white px-4 py-3 font-mono text-[12px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:placeholder:text-zinc-500"
-        />
-        {dragOver && (
-          <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-xl border-2 border-dashed border-blue-500 bg-blue-50/80 dark:bg-blue-950/40">
-            <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
-              Drop to parse your resume
-            </span>
-          </div>
-        )}
+      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-400 dark:text-zinc-500">Your source of truth</p>
+          <h2 className="mt-1 text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">Resume evidence</h2>
+        </div>
+        <Badge tone="emerald">{selected} of {bullets.length} selected</Badge>
       </div>
 
-      <div className="grid grid-cols-1 gap-2">
+      <div className="grid min-h-0 grid-cols-1 gap-4 xl:grid-cols-2">
+        <section className="flex h-[68vh] min-h-[460px] max-h-[760px] min-w-0 flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex min-h-[62px] items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Original resume</h3>
+              <p className="mt-0.5 truncate text-[11px] text-zinc-500" title={sourceName}>{sourceName}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {rawCV && sourceKind !== "pdf" && <button onClick={() => setEditingSource((value) => !value)} className={btnSecondary}>{editingSource ? "Preview" : "Edit text"}</button>}
+              <button onClick={() => fileRef.current?.click()} disabled={busy} className={btnPrimary}>{busy ? "Reading…" : "Upload"}</button>
+            </div>
+          </div>
+          <div
+            className="relative min-h-0 flex-1 overflow-auto bg-zinc-50/70 p-4 dark:bg-zinc-900/40"
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFile(e.dataTransfer.files?.[0]); }}
+          >
+            {editingSource ? (
+              <textarea
+                value={rawCV}
+                onChange={(e) => setRawCV(e.target.value)}
+                spellCheck={false}
+                aria-label="Edit source resume text"
+                placeholder="Drop a PDF, DOCX, TXT, or Markdown resume here, or paste your full career history."
+                className="h-full min-h-[360px] w-full resize-none rounded-lg border border-zinc-300 bg-white px-4 py-3 font-mono text-[12px] leading-relaxed text-zinc-800 outline-none placeholder:text-zinc-400 focus:border-blue-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
+              />
+            ) : sourceKind === "pdf" && sourcePreviewUrl ? (
+              <iframe title={`Original resume PDF: ${sourceName}`} src={sourcePreviewUrl} className="h-full min-h-[400px] w-full rounded-lg border border-zinc-200 bg-white dark:border-zinc-800" />
+            ) : rawCV ? (
+              <article className="mx-auto min-h-full max-w-2xl bg-white px-6 py-7 shadow-sm ring-1 ring-zinc-200/80 dark:bg-zinc-950 dark:ring-zinc-800">
+                {sourceKind === "markdown" ? <div className="text-[13px] leading-relaxed"><Markdown>{rawCV}</Markdown></div> : <pre className="whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.8] text-zinc-700 dark:text-zinc-300">{rawCV}</pre>}
+              </article>
+            ) : (
+              <button onClick={() => fileRef.current?.click()} className="flex h-full min-h-[360px] w-full flex-col items-center justify-center rounded-lg border border-dashed border-zinc-300 px-8 text-center transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-zinc-700 dark:hover:bg-blue-950/20">
+                <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Add your resume</span>
+                <span className="mt-1 max-w-xs text-xs leading-relaxed text-zinc-500">Upload a PDF, DOCX, Markdown, or text file. Its source will stay here beside the extracted bullets.</span>
+                <span className="mt-4 rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white">Choose a file</span>
+              </button>
+            )}
+            {dragOver && <div className="pointer-events-none absolute inset-0 grid place-items-center border-2 border-dashed border-blue-500 bg-blue-50/85 dark:bg-blue-950/60"><span className="text-xs font-semibold text-blue-700 dark:text-blue-300">Drop to load this resume</span></div>}
+          </div>
+        </section>
+
+        <section className="flex h-[68vh] min-h-[460px] max-h-[760px] min-w-0 flex-col overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
+          <div className="flex min-h-[62px] items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">Extracted bullets</h3>
+              <p className="mt-0.5 text-[11px] text-zinc-500">Choose the evidence to tailor for a role</p>
+            </div>
+            <button onClick={parseFromRaw} disabled={!rawCV.trim()} className={btnSecondary}>Re-parse</button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <div className="grid grid-cols-1 gap-2">
         {bullets.map((b) => (
           <div
             key={b.id}
@@ -433,7 +453,7 @@ function ResumeSection() {
             </button>
           </div>
         ))}
-      </div>
+            </div>
 
       {bullets.length === 0 && (
         <p className="rounded-xl border border-dashed border-zinc-300 px-4 py-6 text-center text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
@@ -465,6 +485,9 @@ function ResumeSection() {
         >
           Add
         </button>
+      </div>
+          </div>
+        </section>
       </div>
     </section>
   );
@@ -1137,7 +1160,6 @@ function TraceSection() {
 function DocumentHeader() {
   const ws = useActiveWorkspace();
   const bullets = useAgentStore((s) => s.bullets);
-  const providers = useAgentStore((s) => s.providers);
   const selected = bullets.filter((b) => b.selected).length;
   const tone: Tone =
     ws.status === "error" ? "rose" : ws.status === "done" ? "emerald" : ws.status === "idle" ? "slate" : "sky";
@@ -1152,8 +1174,6 @@ function DocumentHeader() {
         {ws.job.baseRange && <Badge tone="emerald">{formatComp(ws.job.baseRange)}</Badge>}
         <Badge tone={tone}>{ws.status}</Badge>
         <Badge tone="slate">{selected} bullets</Badge>
-        {providers?.jev && <Badge tone="violet">JEV {providers.jev.transport}</Badge>}
-        {providers?.llm && <Badge tone="sky">LLM {providers.llm.provider}</Badge>}
       </div>
     </header>
   );
@@ -1205,7 +1225,7 @@ export function DocumentView() {
 
   return (
     <main className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl px-8 py-10">
+      <div className="mx-auto w-full max-w-7xl px-6 py-8 sm:px-10 xl:px-16">
         <DocumentHeader />
         <AgentActivity ws={ws} />
         <div ref={containerRef}>

@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Header from "./Header";
+import { Bootstrap } from "@/components/Bootstrap";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,6 +28,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex h-dvh flex-col overflow-hidden">
+        <Bootstrap />
         <Header />
         <div className="flex min-h-0 min-w-0 flex-1">{children}</div>
       </body>

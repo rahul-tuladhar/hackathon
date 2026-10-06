@@ -2,6 +2,7 @@
 
 import jobs from "@/app/jobs";
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { inferTags, parseBigCV } from "./sample";
 import { extractProfile } from "./resume-profile";
 import type {
@@ -47,6 +48,7 @@ function makeWorkspace(job: JobTarget = BLANK_JOB, intent = ""): Workspace {
     pipelineErrorNode: undefined,
     logs: [],
     usedMock: false,
+    generationProvider: null,
     error: null,
   };
 }
@@ -64,16 +66,21 @@ function cleared(ws: Workspace): Workspace {
     pipelineErrorNode: undefined,
     logs: [],
     usedMock: false,
+    generationProvider: null,
     error: null,
   };
 }
 
 const firstWorkspace = makeWorkspace();
+const IN_PROGRESS_STATUSES = new Set(["routing", "generating", "assessing"]);
 
 type State = {
   rawCV: string;
   bullets: BigCVBullet[];
   sampleLabel: string | null;
+  sourceFilename: string | null;
+  sourceKind: "pdf" | "markdown" | "text" | "docx" | null;
+  sourcePreviewUrl: string | null;
   providers: ProviderStatus | null;
   workspaces: Workspace[];
   activeId: string;
@@ -93,6 +100,7 @@ type Actions = {
   toggleBullet: (id: string) => void;
   updateBullet: (id: string, text: string) => void;
   updateCV: (cv: GeneratedCV) => void;
+  updateWorkspaceCV: (workspaceId: string, cv: GeneratedCV) => void;
   addBullet: (text: string) => void;
   removeBullet: (id: string) => void;
   refreshProviders: () => Promise<void>;
@@ -116,7 +124,12 @@ type Actions = {
   runPipeline: () => Promise<void>;
 };
 
-export const useAgentStore = create<State & Actions>((set, get) => {
+type PersistedState = Pick<
+  State,
+  "rawCV" | "bullets" | "sampleLabel" | "sourceFilename" | "sourceKind" | "workspaces" | "activeId"
+>;
+
+export const useAgentStore = create<State & Actions>()(persist((set, get) => {
   const patch = (id: string, p: Partial<Workspace>) =>
     set((s) => ({
       workspaces: s.workspaces.map((w) => (w.id === id ? { ...w, ...p } : w)),
@@ -138,6 +151,9 @@ export const useAgentStore = create<State & Actions>((set, get) => {
     rawCV: "",
     bullets: [],
     sampleLabel: null,
+    sourceFilename: null,
+    sourceKind: null,
+    sourcePreviewUrl: null,
     providers: null,
     workspaces: [firstWorkspace],
     activeId: firstWorkspace.id,
@@ -147,6 +163,8 @@ export const useAgentStore = create<State & Actions>((set, get) => {
 
     hydrateSample: () => {
       import("./sample").then(({ SAMPLE_BIG_CV, SAMPLE_JOB }) => {
+        const previousPreview = get().sourcePreviewUrl;
+        if (previousPreview) URL.revokeObjectURL(previousPreview);
         const ws = makeWorkspace(
           SAMPLE_JOB,
           "Tailor this for the payments platform role and emphasise reliability and scale. Keep it to one page, ATS-friendly.",
@@ -155,6 +173,9 @@ export const useAgentStore = create<State & Actions>((set, get) => {
           rawCV: SAMPLE_BIG_CV,
           bullets: parseBigCV(SAMPLE_BIG_CV),
           sampleLabel: "Payments sample",
+          sourceFilename: "payments-resume.md",
+          sourceKind: "markdown",
+          sourcePreviewUrl: null,
           workspaces: [ws],
           activeId: ws.id,
         });
@@ -163,10 +184,15 @@ export const useAgentStore = create<State & Actions>((set, get) => {
 
     loadResume: () => {
       import("./rahul-resume").then(({ RAHUL_RESUME, RAHUL_DEFAULT_INTENT }) => {
+        const previousPreview = get().sourcePreviewUrl;
+        if (previousPreview) URL.revokeObjectURL(previousPreview);
         set((s) => ({
           rawCV: RAHUL_RESUME,
           bullets: parseBigCV(RAHUL_RESUME),
           sampleLabel: "Rahul Tuladhar (real resume)",
+          sourceFilename: "rahul-resume.md",
+          sourceKind: "markdown",
+          sourcePreviewUrl: null,
           workspaces: s.workspaces.map((w) =>
             cleared({ ...w, intent: w.intent || RAHUL_DEFAULT_INTENT }),
           ),
@@ -196,10 +222,24 @@ export const useAgentStore = create<State & Actions>((set, get) => {
           return;
         }
         const bullets = parseBigCV(data.text);
+        const extension = file.name.split(".").pop()?.toLowerCase();
+        const sourceKind = extension === "pdf" || file.type === "application/pdf"
+          ? "pdf"
+          : extension === "docx" || file.type.includes("wordprocessingml")
+            ? "docx"
+            : extension === "md" || extension === "markdown"
+              ? "markdown"
+              : "text";
+        const sourcePreviewUrl = sourceKind === "pdf" ? URL.createObjectURL(file) : null;
+        const previousPreview = get().sourcePreviewUrl;
+        if (previousPreview) URL.revokeObjectURL(previousPreview);
         set((s) => ({
           rawCV: data.text,
           bullets,
           sampleLabel: `${file.name} · ${bullets.length} bullets`,
+          sourceFilename: file.name,
+          sourceKind,
+          sourcePreviewUrl,
           workspaces: s.workspaces.map(cleared),
         }));
         appendLog(
@@ -215,11 +255,16 @@ export const useAgentStore = create<State & Actions>((set, get) => {
     },
 
     clearAll: () => {
+      const previousPreview = get().sourcePreviewUrl;
+      if (previousPreview) URL.revokeObjectURL(previousPreview);
       const ws = makeWorkspace();
       set({
         rawCV: "",
         bullets: [],
         sampleLabel: null,
+        sourceFilename: null,
+        sourceKind: null,
+        sourcePreviewUrl: null,
         workspaces: [ws],
         activeId: ws.id,
         flowOpen: false,
@@ -227,7 +272,17 @@ export const useAgentStore = create<State & Actions>((set, get) => {
       });
     },
 
-    setRawCV: (text) => set({ rawCV: text }),
+    setRawCV: (text) => {
+      const previousPreview = get().sourcePreviewUrl;
+      if (previousPreview) URL.revokeObjectURL(previousPreview);
+      set({
+        rawCV: text,
+        sampleLabel: null,
+        sourceFilename: "Edited resume.md",
+        sourceKind: "markdown",
+        sourcePreviewUrl: null,
+      });
+    },
 
     parseFromRaw: () => {
       const bullets = parseBigCV(get().rawCV);
@@ -260,6 +315,13 @@ export const useAgentStore = create<State & Actions>((set, get) => {
     updateCV: (cv) =>
       set((s) => ({
         workspaces: s.workspaces.map((w) => (w.id === s.activeId ? { ...w, cv } : w)),
+      })),
+
+    updateWorkspaceCV: (workspaceId, cv) =>
+      set((s) => ({
+        workspaces: s.workspaces.map((w) =>
+          w.id === workspaceId ? { ...w, cv, assessment: null } : w,
+        ),
       })),
 
     addBullet: (text) =>
@@ -557,7 +619,11 @@ export const useAgentStore = create<State & Actions>((set, get) => {
         const genData = generation.result;
         if (!genData) throw new Error("CV generation stream ended before the draft was complete");
 
-        patch(id, { cv: genData.cv, usedMock: genData.provider === "mock" });
+        patch(id, {
+          cv: genData.cv,
+          usedMock: genData.provider === "mock",
+          generationProvider: { provider: genData.provider, model: genData.model },
+        });
         appendLog(id, "llm", `Tailored CV generated via ${genData.provider}/${genData.model}`);
 
         currentNode = "assess";
@@ -582,7 +648,46 @@ export const useAgentStore = create<State & Actions>((set, get) => {
       }
     },
   };
-});
+}, {
+  name: "hirehand-workspaces-v1",
+  version: 1,
+  storage: createJSONStorage(() => localStorage),
+  skipHydration: true,
+  partialize: (state): PersistedState => ({
+    rawCV: state.rawCV,
+    bullets: state.bullets,
+    sampleLabel: state.sampleLabel,
+    sourceFilename: state.sourceFilename,
+    sourceKind: state.sourceKind,
+    workspaces: state.workspaces,
+    activeId: state.activeId,
+  }),
+  merge: (persisted, current) => {
+    const saved = persisted as Partial<PersistedState> | undefined;
+    const workspaces = (saved?.workspaces ?? current.workspaces).map((workspace) => {
+      if (!IN_PROGRESS_STATUSES.has(workspace.status)) return workspace;
+      return {
+        ...workspace,
+        status: workspace.cv ? "done" as const : "idle" as const,
+        activeCapability: null,
+        error: workspace.cv ? null : "Generation was interrupted. Run it again to continue.",
+      };
+    });
+
+    return {
+      ...current,
+      ...saved,
+      sourcePreviewUrl: null,
+      providers: null,
+      flowOpen: false,
+      selectedNode: null,
+      workspaces,
+      activeId: workspaces.some((workspace) => workspace.id === saved?.activeId)
+        ? saved?.activeId ?? current.activeId
+        : workspaces[0]?.id ?? current.activeId,
+    };
+  },
+}));
 
 /** The active workspace, or the first one as a fallback. */
 export function useActiveWorkspace(): Workspace {

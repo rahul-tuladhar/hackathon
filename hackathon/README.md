@@ -30,7 +30,11 @@ This is the CV + Job + JEV slice of the **res-you-may-agents** team's build for 
 
 ```
 app/
-  page.tsx                 document shell (header · job tabs · contents rail · document)
+  page.tsx                 redirects to the source resume editor
+  resume/page.tsx          editable source resume and PDF preview
+  workspace/page.tsx       job tabs · document · pipeline overlay
+  JobsResume.tsx           JEV-scored one-page resume generation on /jobs
+  FinalOutput.tsx          edit and export each job's generated resume
   api/jev/route.ts         JevRouter plan (HTTP → CLI → policy fallback)
   api/generate/route.ts    tailored CV (LLM, deterministic mock fallback)
   api/assess/route.ts      quality assessment (LLM, deterministic mock fallback)
@@ -38,9 +42,9 @@ app/
   api/parse-resume/route.ts upload a resume (PDF via unpdf, DOCX via mammoth)
   api/health/route.ts      provider detection for the badges
 components/
-  TopBar.tsx               brand, provider badges, resume actions
+  AccountMenu.tsx          profile, appearance, and help settings
+  AppSettingsDialog.tsx    app-wide settings dialog
   JobTabs.tsx              one tab per target job, sourced from app/jobs.ts
-  ContentsRail.tsx         section nav + resume source
   DocumentView.tsx         the markdown document: CV, job, pipeline, quality, trace
   FlowDiagram.tsx          the pipeline node graph (embedded + full)
   FlowOverlay.tsx          expanded canvas with the right-hand tour stepper
@@ -54,24 +58,26 @@ lib/
   llm.ts                   OpenAI-compatible failover chain
   prompts.ts               generation + assessment prompts (strict JSON)
   mock.ts                  deterministic offline fallback
-  store.ts                 Zustand workspaces, in-memory only
+  store.ts                 Zustand workspaces persisted in browser storage
 ```
 
 ## UI
 
-- **Job tabs** up top: one tab per target job, each keeping its own intent,
-  JEV plan, tailored CV, assessment and trace. The Big CV is shared across tabs.
-- **Contents rail** on the left: section nav with completion ticks, plus the
-  resume source and Upload/Parse.
-- **Document column**: the whole flow rendered as a markdown document with
-  numbered sections (Big CV, Target job, Pipeline, Tailored CV, Quality, Agent
-  trace).
+- **Resume editor** at `/resume`: edit the source experience and preview its PDF.
+- **Document workspace** at `/workspace`: job tabs, the Big CV source, pipeline,
+  tailored CV, quality assessment, and agent trace.
+- **Jobs page** at `/jobs`: browse roles, rank resume bullets with Jev, and
+  generate a tailored resume above the people to reach out to.
 - **Pipeline**: an embedded node graph. **Expand** opens a full-screen canvas
   with a right-hand **Tour** stepper; click any node (or step) to see its detail.
+- **Per-job output**: generate and edit the tailored resume on the Jobs page and
+  download its PDF. The resume section appears above people to reach out to.
+- **Account settings**: edit your local profile, appearance, and help preferences
+  from the account menu in the top navigation.
 - **Agent trace**: a collapsed section at the bottom.
 
-**No database.** All state lives in a Zustand store for the session, exactly as the
-team scoped it: `big CV and intent can change`, nothing persisted.
+**No database.** Resume content, workspaces, and profile preferences persist in
+this browser using local storage.
 
 ## JEV integration in detail
 
@@ -133,8 +139,9 @@ npm run jev
 npm run dev
 ```
 
-Open http://localhost:3000. The app seeds itself with a sample Big CV and job on
-first load.
+Open http://localhost:3000/jobs to browse roles. `/resume` edits the source
+resume; `/workspace` opens the document-style pipeline view. The root route opens
+`/resume`.
 
 - **Upload** (top of the Big CV panel) parses a resume file into bullets. PDF via
   `unpdf`, DOCX via `mammoth`, TXT/MD/RTF as text. You can also drag a file onto
@@ -152,7 +159,7 @@ Set intent → Run agent → Review**.
 
 ## End-to-end walkthrough
 
-1. Open http://localhost:3000.
+1. Open http://localhost:3000/workspace.
 2. Click **Upload** in the Big CV panel and choose a resume file (or drag it onto
    the textarea), or click **My resume** for the bundled real example. Either way
    the bullets appear in the list (22 for the PDF, 25 for the bundled text).
@@ -169,36 +176,36 @@ Set intent → Run agent → Review**.
 
 ## Environment
 
-Create a workspace-local `hackathon/.env.local` from `.env.local.example` (or
-`.env.example`) and add credentials there. `.env.local` is ignored by Git; share
-the example files and setup steps with other workspaces, never credential
-values. Each Conductor workspace needs its own `.env.local`.
+Each Conductor workspace needs its own ignored `hackathon/.env.local`. Start from
+`.env.local.example` and add credentials for that workspace only. Git carries the
+placeholders and setup instructions, never the actual keys.
 
-- **Resume generation and quality assessment:** configure `NEON_AI_GATEWAY_TOKEN`
-  and `NEON_AI_GATEWAY_BASE_URL` for the preferred hosted LLM, or configure the
-  Vercel, OpenAI-compatible, or OpenCode provider described above. Local LM Studio
-  is optional. `LLM_LOCAL=0` disables local-model discovery. If no hosted provider
-  is configured, generation and assessment use a deterministic fallback.
-- **Company research:** `EXA_API_KEY` enables live Exa search. Without it, the
-  feature can use an LLM-generated knowledge brief when a hosted model is
-  configured. Research is context only and is not resume evidence.
-- **Jev live routing:** `VERCEL_AI_GATEWAY` enables the hosted Vercel-backed Jev
-  decision model. `JEV_HTTP_URL` can point to a running JevRouter service;
-  otherwise JevRouter uses its offline demo CLI/provider. `JEV_PROVIDER` and
-  `OPENROUTER_API_KEY` configure the OpenRouter route when used.
-- **Outreach drafts:** `AGENTMAIL_API_KEY` and `AGENTMAIL_INBOX_ID` enable draft
-  creation in the configured AgentMail inbox. Drafts are not sent by the app.
-  `OUTREACH_LIVE_RECIPIENTS` defaults to `false`; set `OUTREACH_TEST_RECIPIENT`
-  for a test address and `OUTREACH_SENDER_NAME` for the signature.
+- `NEON_AI_GATEWAY_BASE_URL` and `NEON_AI_GATEWAY_TOKEN` configure the hosted LLM
+  for resume generation, assessment, summaries, and research briefs. `NEON_MODEL`
+  (or legacy `NEON_AI_GATEWAY_MODEL`) optionally selects the Neon model.
+- `AI_GATEWAY_API_KEY` configures the optional Vercel AI Gateway fallback for LLM
+  tasks. `VERCEL_AI_GATEWAY_API_KEY` and legacy `VERCEL_AI_GATEWAY` are accepted.
+- `EXA_API_KEY` enables live job and people research. `EXA_AGENT_MAX_COST` sets
+  the optional per-run spend ceiling. Research is context, not resume evidence.
+- `AGENTMAIL_API_KEY` and `AGENTMAIL_INBOX_ID` save outreach drafts to the chosen
+  inbox. The app does not send email. Create a key scoped to the hackathon inbox
+  with send/read mail access; the key is optional until one is available.
+  `OUTREACH_TEST_RECIPIENT`, `OUTREACH_LIVE_RECIPIENTS`, and
+  `OUTREACH_SENDER_NAME` control test recipients and signatures.
+- `VERCEL_AI_GATEWAY`, `JEV_HTTP_URL`, `JEV_PROVIDER`, and `OPENROUTER_API_KEY`
+  optionally configure hosted/live JevRouter decision routing. Without these,
+  JevRouter uses its offline demo provider.
+- `LLM_LOCAL=0` disables local LM Studio auto-detection when validating hosted
+  model output. Without hosted credentials, the app may use local LM Studio and
+  ultimately falls back to deterministic mock generation.
 
-After editing `.env.local`, restart `npm run dev`. `/api/health` reports which
-LLM provider and model the workspace resolved without exposing credentials.
+After editing `.env.local`, restart `npm run dev`. Check `/api/health` to see the
+resolved LLM provider and model without exposing credentials.
 
 ## What is real vs. stubbed
 
-- **Real:** JevRouter decision/plan with its full contract; hosted gateway or
-  local LLM generation and scoring; Big CV parsing; keyword coverage math; the
-  whole UI.
+- **Real:** JevRouter planning, hosted or local LLM generation and assessment when
+  configured, Big CV parsing, keyword coverage, resume editing, and the UI.
 - **Stubbed / pluggable:** `email_send` is modelled as a gated capability but no
   mail is sent; `cover_letter` is produced inside the generation step rather than
   as its own routed capability; Exa research falls back to the model's knowledge

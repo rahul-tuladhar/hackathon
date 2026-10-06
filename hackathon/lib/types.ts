@@ -181,5 +181,6 @@ export type Workspace = {
   pipelineErrorNode?: string;
   logs: LogEntry[];
   usedMock: boolean;
+  generationProvider: { provider: string; model: string } | null;
   error: string | null;
 };

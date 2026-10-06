@@ -7,6 +7,7 @@ import JobResearch from "../JobResearch";
 import JobsResume from "../JobsResume";
 import JobRulesEval from "../JobRulesEval";
 import JobSummary from "../JobSummary";
+import FinalOutput from "../FinalOutput";
 
 function formatComp([min, max]: [number, number]) {
   const k = (n: number) => `$${Math.round(n / 1000)}K`;
@@ -80,6 +81,8 @@ export default function JobsPage() {
             <JobRulesEval key={`rules-${selectedId}`} jobId={Number(selectedId)} />
 
             <JobsResume key={`resume-${selectedId}`} jobId={Number(selectedId)} />
+
+            <FinalOutput key={`final-output-${selectedId}`} jobId={Number(selectedId)} job={selected} />
 
             <JobResearch key={selectedId} jobId={Number(selectedId)} company={selected.company} />
           </div>
